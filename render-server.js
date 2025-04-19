@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 // Виправлений імпорт HttpsProxyAgent
-const { HttpsProxyAgent } = require('https-proxy-agent');
+const HttpsProxyAgent = require('https-proxy-agent');
 const WebSocket = require('ws');
 const http = require('http');
 const url = require('url');
@@ -67,8 +67,6 @@ app.use((req, res, next) => {
 });
 
 // Функція для створення HTTPS агента з поточними налаштуваннями проксі
-const HttpsProxyAgent = require('https-proxy-agent');
-
 function createProxyAgent() {
   if (!PROXY_CONFIG.host || !PROXY_CONFIG.port) {
     console.log('Проксі не налаштовано.');
