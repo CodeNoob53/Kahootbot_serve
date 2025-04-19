@@ -68,13 +68,12 @@ app.use((req, res, next) => {
 
 // Функція для створення HTTPS агента з поточними налаштуваннями проксі
 function createProxyAgent(proxyConfig) {
-  const { host, port, username, password } = proxyConfig;
-  
-  if (!host || !port) {
+  if (!proxyConfig || !proxyConfig.host || !proxyConfig.port) {
     console.warn('⚠️ Недостатньо даних для створення проксі-агента');
     return null;
   }
 
+  const { host, port, username, password } = proxyConfig;
   const authStr = username && password ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@` : '';
   const proxyUrl = `http://${authStr}${host}:${port}`;
 
@@ -88,10 +87,17 @@ function createProxyAgent(proxyConfig) {
   }
 }
 
+
 // Ініціалізація HTTPS агента для проксі
 let httpsAgent = null;
 try {
-  httpsAgent = createProxyAgent();
+  proxyAgent = createProxyAgent(PROXY_CONFIG);
+  if (proxyAgent) {
+    httpsAgent = proxyAgent;
+    console.log('✅ Проксі-агент успішно створено');
+  } else {
+    console.warn('⚠️ Проксі-агент не створено, продовжуємо без проксі');
+  }
 } catch (error) {
   console.error('Помилка ініціалізації проксі-агента:', error);
 }
