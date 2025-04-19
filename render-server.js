@@ -145,63 +145,73 @@ app.get('/proxy-info', (req, res) => {
 
 // Додаємо кінцеву точку для перевірки роботи проксі
 app.get('/test-proxy', async (req, res) => {
+  console.log('Тестування проксі...');
+  
+  if (!httpsAgent) {
+    return res.status(503).json({
+      success: false,
+      message: 'Проксі не налаштовано'
+    });
+  }
+  
   try {
-    if (!PROXY_CONFIG.host || !PROXY_CONFIG.port) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Проксі не налаштовано' 
-      });
-    }
-    
-    // Створюємо тестовий запит через проксі
-    const testUrl = 'https://kahoot.it/reserve/session/';
-    
-    // Відправляємо запит використовуючи http або https module з Node.js
-    const testResponse = await new Promise((resolve, reject) => {
-      const https = require('https');
-      const options = {
-        agent: httpsAgent,
-        method: 'GET',
-        headers: {
-          'User-Agent': 'KahootBot/1.0'
-        }
-      };
-      
-      const req = https.request(testUrl, options, (res) => {
+    const testUrl = 'https://example.com';
+    const response = await new Promise((resolve, reject) => {
+      const testReq = https.request(testUrl, { agent: httpsAgent }, (resp) => {
         let data = '';
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-        res.on('end', () => {
+        resp.on('data', (chunk) => { data += chunk; });
+        resp.on('end', () => {
           resolve({
-            statusCode: res.statusCode,
-            headers: res.headers,
-            data: data
+            statusCode: resp.statusCode,
+            headers: resp.headers,
+            body: data
           });
         });
       });
       
-      req.on('error', (e) => {
-        reject(e);
-      });
-      
-      req.end();
+      testReq.on('error', (err) => reject(err));
+      testReq.end();
     });
     
-    return res.json({
-      success: true,
-      message: 'Проксі працює',
+    if (response.statusCode === 407) {
+      return res.status(503).json({
+        success: false,
+        message: 'Проксі вимагає автентифікації. Перевірте ім\'я користувача та пароль.',
+        testResponse: {
+          statusCode: response.statusCode,
+          isSuccess: false
+        }
+      });
+    }
+    
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return res.status(200).json({
+        success: true,
+        message: 'Проксі працює',
+        testResponse: {
+          statusCode: response.statusCode,
+          isSuccess: true
+        }
+      });
+    }
+    
+    return res.status(503).json({
+      success: false,
+      message: `Проксі повернув помилку: ${response.statusCode}`,
       testResponse: {
-        statusCode: testResponse.statusCode,
-        isSuccess: testResponse.statusCode >= 200 && testResponse.statusCode < 300
+        statusCode: response.statusCode,
+        isSuccess: false
       }
     });
   } catch (error) {
-    console.error('Помилка тестування проксі:', error);
+    console.error('Помилка тестування проксі:', error.message);
     return res.status(500).json({
       success: false,
-      message: 'Помилка тестування проксі',
-      error: error.message
+      message: `Помилка тестування проксі: ${error.message}`,
+      testResponse: {
+        statusCode: null,
+        isSuccess: false
+      }
     });
   }
 });
