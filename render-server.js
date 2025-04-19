@@ -75,7 +75,9 @@ function createProxyAgent() {
   const authStr = PROXY_CONFIG.auth.username && PROXY_CONFIG.auth.password 
     ? `${PROXY_CONFIG.auth.username}:${PROXY_CONFIG.auth.password}`
     : '';
-    
+  
+  console.log(`Creating HttpsProxyAgent with host: ${PROXY_CONFIG.host}, port: ${PROXY_CONFIG.port}, auth: ${authStr || 'none'}`);
+  
   return new HttpsProxyAgent({
     host: PROXY_CONFIG.host,
     port: PROXY_CONFIG.port,
