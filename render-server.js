@@ -84,8 +84,8 @@ function createProxyAgent() {
   console.log('🔒 Побудований проксі URL:', proxyUrl);
 
   try {
-    // 🟢 Ось ключ: використовуємо "new"
-    return HttpsProxyAgent(proxyUrl);
+    // 🟢 Виправлено: додано ключове слово 'new'
+    return new HttpsProxyAgent(proxyUrl);
   } catch (e) {
     console.error('❌ Помилка створення агента:', e.message);
     return null;
