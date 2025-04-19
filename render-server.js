@@ -4,7 +4,7 @@ const express = require('express')
 const cors = require('cors')
 const { createProxyMiddleware } = require('http-proxy-middleware')
 // Виправлений імпорт HttpsProxyAgent
-const HttpsProxyAgent = require('https-proxy-agent')
+const HttpsProxyAgent = require('https-proxy-agent').default || require('https-proxy-agent')
 const WebSocket = require('ws')
 const http = require('http')
 const url = require('url')
@@ -83,16 +83,17 @@ function createProxyAgent() {
     ? `http://${authStr}@${PROXY_CONFIG.host}:${PROXY_CONFIG.port}`
     : `http://${PROXY_CONFIG.host}:${PROXY_CONFIG.port}`;
 
-  console.log('🔒 Побудований проксі URL:', proxyUrl);
-
   try {
-    // Тепер – новий конструктор
-    return new HttpsProxyAgent(proxyUrl);
+    // Після виправлення імпорту це має спрацювати
+    const agent = new HttpsProxyAgent(proxyUrl);
+    console.log('✅ Агент створено:', agent.constructor.name);
+    return agent;
   } catch (e) {
     console.error('❌ Помилка створення агента:', e.message);
     return null;
   }
 }
+
 
 
 // Ініціалізація HTTPS агента для проксі
