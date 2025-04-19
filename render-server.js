@@ -173,19 +173,17 @@ app.get('/test-proxy', async (req, res) => {
         message: 'Проксі не налаштовано' 
       });
     }
-    
-    // Перевіряємо, чи був створений httpsAgent
+
     if (!httpsAgent) {
       return res.status(500).json({
         success: false,
         message: 'Проксі-агент не ініціалізовано'
       });
     }
-    
-    // Створюємо тестовий запит через проксі
+
     const testUrl = 'https://kahoot.it/reserve/session/';
-    
-    // Відправляємо запит використовуючи http або https module з Node.js
+    console.log(`➡️ Тестовий запит до ${testUrl} через проксі`);
+
     const testResponse = await new Promise((resolve, reject) => {
       const https = require('https');
       const options = {
@@ -195,28 +193,28 @@ app.get('/test-proxy', async (req, res) => {
           'User-Agent': 'KahootBot/1.0'
         }
       };
-      
-      const req = https.request(testUrl, options, (res) => {
+
+      const proxyReq = https.request(testUrl, options, (proxyRes) => {
         let data = '';
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-        res.on('end', () => {
+        proxyRes.on('data', (chunk) => { data += chunk; });
+        proxyRes.on('end', () => {
           resolve({
-            statusCode: res.statusCode,
-            headers: res.headers,
-            data: data
+            statusCode: proxyRes.statusCode,
+            headers: proxyRes.headers,
+            data
           });
         });
       });
-      
-      req.on('error', (e) => {
+
+      proxyReq.on('error', (e) => {
         reject(e);
       });
-      
-      req.end();
+
+      proxyReq.end();
     });
-    
+
+    console.log(`✅ Відповідь від Kahoot (test-proxy): статус ${testResponse.statusCode}`);
+
     return res.json({
       success: true,
       message: 'Проксі працює',
@@ -226,7 +224,7 @@ app.get('/test-proxy', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Помилка тестування проксі:', error);
+    console.error('❌ Помилка тестування проксі:', error);
     return res.status(500).json({
       success: false,
       message: 'Помилка тестування проксі',
@@ -234,6 +232,7 @@ app.get('/test-proxy', async (req, res) => {
     });
   }
 });
+
 
 // Налаштування проксі для запитів до Kahoot API
 app.use('/kahoot-api', (req, res, next) => {
