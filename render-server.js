@@ -79,15 +79,9 @@ function createProxyAgent() {
       : '';
       
     // Створення проксі-агента з обробкою помилок
-    const proxyOptions = {
-      host: PROXY_CONFIG.host,
-      port: PROXY_CONFIG.port
-    };
-    
-    // Додаємо авторизацію тільки якщо вона є
-    if (authStr) {
-      proxyOptions.auth = authStr;
-    }
+    const proxyUrl = authStr
+    ? `http://${authStr}@${PROXY_CONFIG.host}:${PROXY_CONFIG.port}`
+    : `http://${PROXY_CONFIG.host}:${PROXY_CONFIG.port}`;
     
     console.log('Створення проксі-агента з налаштуваннями:', {
       host: proxyOptions.host,
@@ -95,7 +89,7 @@ function createProxyAgent() {
       hasAuth: Boolean(authStr)
     });
     
-    return new HttpsProxyAgent(proxyOptions);
+    return new HttpsProxyAgent(proxyUrl);
   } catch (error) {
     console.error('Помилка створення проксі-агента:', error);
     return null;
