@@ -1,5 +1,4 @@
-// Проксі-сервер для обходу обмежень CORS при роботі з Kahoot API
-// Оптимізовано для розгортання на Render.com
+// Новий файл render-server.js
 const express = require('express');
 const cors = require('cors');
 const { createProxyMiddleware } = require('http-proxy-middleware');
@@ -20,27 +19,6 @@ try {
   console.log('dotenv не знайдено, використовуємо змінні середовища за замовчуванням');
 }
 
-// Створення файлу .env якщо він не існує (для локальної розробки)
-try {
-  const envPath = path.join(__dirname, '.env');
-  if (!fs.existsSync(envPath)) {
-    console.log('Creating .env file with sample configuration');
-    const sampleEnv = `# Налаштування проксі-сервера
-# Введіть ваші дані замість значень за замовчуванням
-PROXY_HOST=
-PROXY_PORT=
-PROXY_USERNAME=
-PROXY_PASSWORD=
-
-# Налаштування сервера
-PORT=3000
-`;
-    fs.writeFileSync(envPath, sampleEnv);
-  }
-} catch (error) {
-  console.warn('Error creating .env file:', error.message);
-}
-
 // Налаштування проксі з змінних середовища або порожні значення
 const PROXY_CONFIG = {
   host: process.env.PROXY_HOST || '',
@@ -54,19 +32,19 @@ const PROXY_CONFIG = {
 // Створення Express додатку
 const app = express();
 app.use(cors({
-  origin: '*', // Дозволяємо запити з будь-якого джерела
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 app.use(express.json());
 
-// Простий мідлвар для логування запитів
+// Логування запитів
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} | ${req.method} ${req.url}`);
   next();
 });
 
-// Функція для створення HTTPS агента з поточними налаштуваннями проксі
+// Функція для створення HTTPS агента з проксі
 function createProxyAgent() {
   if (!PROXY_CONFIG.host || !PROXY_CONFIG.port) {
     console.log('Проксі не налаштовано.');
@@ -84,14 +62,12 @@ function createProxyAgent() {
   console.log('🔒 Побудований проксі URL:', proxyUrl);
 
   try {
-    // 🟢 Виправлено: додано ключове слово 'new'
     return new HttpsProxyAgent(proxyUrl);
   } catch (e) {
     console.error('❌ Помилка створення агента:', e.message);
     return null;
   }
 }
-
 
 // Ініціалізація HTTPS агента для проксі
 let httpsAgent = null;
@@ -101,7 +77,23 @@ try {
   console.error('Помилка ініціалізації проксі-агента:', error);
 }
 
-// API для встановлення налаштувань проксі
+// --- CORS заголовки для всіх запитів ---
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  next();
+});
+
+// Обробка CORS preflight запитів
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.sendStatus(200);
+});
+
+// --- Ендпоінти для роботи з проксі-сервером ---
 app.post('/set-proxy', (req, res) => {
   try {
     const { host, port, username, password } = req.body;
@@ -124,7 +116,6 @@ app.post('/set-proxy', (req, res) => {
       httpsAgent = createProxyAgent();
       
       if (httpsAgent === null) {
-        // Агент не створено, але продовжуємо роботу без проксі
         console.log('Налаштування проксі оновлено, але агент не створено. Продовжуємо без проксі.');
       }
       
@@ -155,7 +146,6 @@ app.post('/set-proxy', (req, res) => {
   }
 });
 
-// API для отримання поточних налаштувань проксі (без паролів)
 app.get('/proxy-info', (req, res) => {
   return res.json({
     host: PROXY_CONFIG.host,
@@ -164,15 +154,10 @@ app.get('/proxy-info', (req, res) => {
   });
 });
 
-// Додаємо кінцеву точку для перевірки роботи проксі
 app.get('/test-proxy', async (req, res) => {
-  // Додаємо CORS заголовки
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
+  
   try {
-    // Перевірка наявності проксі
     if (!PROXY_CONFIG.host || !PROXY_CONFIG.port) {
       console.log('Проксі не налаштовано');
       return res.status(400).json({ 
@@ -181,10 +166,8 @@ app.get('/test-proxy', async (req, res) => {
       });
     }
 
-    // Спрощена перевірка проксі
     console.log('Тестування проксі-з\'єднання...');
     
-    // Створюємо спрощену тестову відповідь
     return res.json({
       success: true,
       message: 'Проксі налаштовано',
@@ -198,7 +181,6 @@ app.get('/test-proxy', async (req, res) => {
   } catch (error) {
     console.error('Помилка тестування проксі:', error);
     
-    // Надсилаємо спрощену відповідь про помилку
     return res.status(500).json({
       success: false,
       message: 'Помилка тестування проксі',
@@ -231,72 +213,31 @@ app.get('/proxy-status', (req, res) => {
   }
 });
 
-// Додаємо CORS заголовки для всіх запитів
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  next();
-});
-// Додаємо мідлвар для обробки CORS preflight запитів
-app.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.sendStatus(200);
-});
-// Додаємо мідлвар для обробки CORS preflight запитів
-
-
-// Налаштування проксі для запитів до Kahoot API
-app.use('/kahoot-api', (req, res, next) => {
-  // Перевірка чи проксі налаштовано
-  if (!PROXY_CONFIG.host || !PROXY_CONFIG.port) {
-    return res.status(503).json({ 
-      error: 'Service Unavailable', 
-      message: 'Проксі не налаштовано. Будь ласка, спочатку налаштуйте проксі через API /set-proxy' 
-    });
-  }
-  
-  // Перевірка, чи доступний httpsAgent
-  if (!httpsAgent) {
-    return res.status(503).json({
-      error: 'Service Unavailable',
-      message: 'Проксі-агент не ініціалізовано. Спробуйте перезапустити сервер.'
-    });
-  }
-  
-  // Створення проксі-middleware динамічно
-  const proxyMiddleware = createProxyMiddleware({
-    target: 'https://kahoot.it',
-    changeOrigin: true,
-    pathRewrite: {
-      '^/kahoot-api': ''
-    },
-    agent: httpsAgent,
-    onProxyReq: (proxyReq, req, res) => {
-      // Логування запитів
-      console.log(`Proxying request to: ${req.method} ${req.path}`);
-    },
-    onProxyRes: (proxyRes, req, res) => {
-      // Встановлення заголовків CORS
-      proxyRes.headers['Access-Control-Allow-Origin'] = '*';
-      proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
-      proxyRes.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept, Authorization';
-    },
-    onError: (err, req, res) => {
-      console.error('Proxy error:', err);
-      res.status(500).json({ error: 'Proxy Error', message: err.message });
-    }
+// --- Базовий роут для перевірки стану сервера ---
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'Server is running', 
+    proxyConfigured: Boolean(PROXY_CONFIG.host && PROXY_CONFIG.port),
+    proxyInfo: PROXY_CONFIG.host && PROXY_CONFIG.port ? 
+      `${PROXY_CONFIG.host}:${PROXY_CONFIG.port}` : 'Not configured',
+    hasAuth: Boolean(PROXY_CONFIG.auth.username && PROXY_CONFIG.auth.password),
+    timestamp: new Date().toISOString(),
+    agentInitialized: httpsAgent !== null
   });
-  
-  // Виконання створеного middleware
-  return proxyMiddleware(req, res, next);
 });
 
-// Ендпоінт для розшифрування challenge-токену Kahoot
+// --- Додаткові маршрути для моніторингу здоров'я сервера ---
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
+// --- KAHOOT API ENDPOINTS ---
+
+// !!! ВАЖЛИВО: Ендпоінт для розшифрування challenge-токену
+// Повинен бути оголошений ПЕРЕД налаштуванням загального проксі для /kahoot-api
 app.post('/kahoot-api/solve-challenge', (req, res) => {
   try {
+    console.log('Отримано запит на розшифрування challenge-токену');
     const { challenge } = req.body;
     
     if (!challenge) {
@@ -305,8 +246,6 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
         message: 'Відсутній challenge токен' 
       });
     }
-    
-    console.log('Отримано запит на розшифрування challenge-токену');
     
     // Отримуємо закодоване повідомлення з виклику decode.call
     let encodedMessage;
@@ -335,7 +274,7 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
     // Обчислюємо offset
     let offset = 0;
     try {
-      // Очищаємо формулу від пробілів, табуляцій та інших неправильних символів
+      // Чистимо формулу від пробілів, табуляцій та інших неправильних символів
       const cleanFormula = offsetFormula
         .replace(/\s+/g, '') // Видаляємо пробіли та табуляції
         .replace(/\t/g, '')  // Видаляємо табуляції явно
@@ -351,7 +290,7 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
       console.error('Помилка обчислення offset:', evalError);
       
       // Якщо не вдалося обчислити, спробуємо типове значення
-      offset = 227337; // Типове значення на основі логів та формул
+      offset = 230000; // Типове значення на основі логів
       console.log('Використовуємо типове значення offset:', offset);
     }
     
@@ -383,7 +322,7 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
   }
 });
 
-// API для отримання токена сесії з Kahoot
+// Ендпоінт для отримання токена сесії з Kahoot
 app.get('/kahoot-api/reserve/session/:pin', async (req, res) => {
   try {
     const { pin } = req.params;
@@ -411,7 +350,6 @@ app.get('/kahoot-api/reserve/session/:pin', async (req, res) => {
 
     console.log(`Отримання токену сесії для PIN: ${pin}`);
 
-    const https = require('https');
     const kahootUrl = `https://kahoot.it/reserve/session/${pin}/`;
 
     const response = await new Promise((resolve, reject) => {
@@ -419,7 +357,9 @@ app.get('/kahoot-api/reserve/session/:pin', async (req, res) => {
         method: 'GET',
         agent: httpsAgent,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.93 Safari/537.36',
+          'Origin': 'https://kahoot.it',
+          'Referer': 'https://kahoot.it/'
         }
       }, (resp) => {
         let data = '';
@@ -459,51 +399,58 @@ app.get('/kahoot-api/reserve/session/:pin', async (req, res) => {
   }
 });
 
-// Базовий роут для перевірки стану сервера
-app.get('/', (req, res) => {
-  res.json({ 
-    status: 'Server is running', 
-    proxyConfigured: Boolean(PROXY_CONFIG.host && PROXY_CONFIG.port),
-    proxyInfo: PROXY_CONFIG.host && PROXY_CONFIG.port ? 
-      `${PROXY_CONFIG.host}:${PROXY_CONFIG.port}` : 'Not configured',
-    hasAuth: Boolean(PROXY_CONFIG.auth.username && PROXY_CONFIG.auth.password),
-    timestamp: new Date().toISOString(),
-    agentInitialized: httpsAgent !== null
+// !!! ВАЖЛИВО: Загальний проксі для всіх інших запитів до Kahoot API повинен бути останнім
+// Після всіх спеціальних ендпоінтів
+app.use('/kahoot-api', (req, res, next) => {
+  // Перевірка чи проксі налаштовано
+  if (!PROXY_CONFIG.host || !PROXY_CONFIG.port) {
+    return res.status(503).json({ 
+      error: 'Service Unavailable', 
+      message: 'Проксі не налаштовано. Будь ласка, спочатку налаштуйте проксі через API /set-proxy' 
+    });
+  }
+  
+  // Перевірка, чи доступний httpsAgent
+  if (!httpsAgent) {
+    return res.status(503).json({
+      error: 'Service Unavailable',
+      message: 'Проксі-агент не ініціалізовано. Спробуйте перезапустити сервер.'
+    });
+  }
+  
+  // Всі запити, крім тих, що вже оброблені спеціальними ендпоінтами, будуть проксіюватися
+  const proxyMiddleware = createProxyMiddleware({
+    target: 'https://kahoot.it',
+    changeOrigin: true,
+    pathRewrite: {
+      '^/kahoot-api': ''
+    },
+    agent: httpsAgent,
+    onProxyReq: (proxyReq, req, res) => {
+      console.log(`Proxying request to: ${req.method} ${req.path}`);
+    },
+    onProxyRes: (proxyRes, req, res) => {
+      proxyRes.headers['Access-Control-Allow-Origin'] = '*';
+      proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+      proxyRes.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept, Authorization';
+    },
+    onError: (err, req, res) => {
+      console.error('Proxy error:', err);
+      res.status(500).json({ error: 'Proxy Error', message: err.message });
+    }
   });
+  
+  return proxyMiddleware(req, res, next);
 });
 
-// Додаткові маршрути для моніторингу здоров'я сервера (використовується Render)
-app.get('/health', (req, res) => {
-  res.status(200).send('OK');
-});
-
-// Статичний файл для перенаправлення на GitHub
-app.get('/redirect', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta http-equiv="refresh" content="0; url=https://github.com/yourusername/kahoot-bot" />
-      <title>Redirecting...</title>
-    </head>
-    <body>
-      <p>Перенаправлення на GitHub репозиторій...</p>
-    </body>
-    </html>
-  `);
-});
-
-// Створення HTTP сервера
+// --- НАЛАШТУВАННЯ WEBSOCKET ПРОКСІ ---
 const server = http.createServer(app);
-
-// Налаштування WebSocket проксі
 const wsServer = new WebSocket.Server({ noServer: true });
 
 // Обробка оновлення з'єднання для WebSocket
 server.on('upgrade', (request, socket, head) => {
   const pathname = url.parse(request.url).pathname;
   
-  // Лише для WebSocket запитів до Kahoot
   if (pathname.startsWith('/kahoot-ws')) {
     wsServer.handleUpgrade(request, socket, head, (ws) => {
       wsServer.emit('connection', ws, request);
@@ -515,7 +462,6 @@ server.on('upgrade', (request, socket, head) => {
 
 // Обробка WebSocket з'єднань
 wsServer.on('connection', (ws, request) => {
-  // Перевірка чи проксі налаштовано
   if (!PROXY_CONFIG.host || !PROXY_CONFIG.port) {
     console.error('WebSocket connection attempt, but proxy is not configured');
     ws.send(JSON.stringify({
@@ -526,7 +472,6 @@ wsServer.on('connection', (ws, request) => {
     return;
   }
   
-  // Перевірка, чи доступний httpsAgent
   if (!httpsAgent) {
     console.error('WebSocket connection attempt, but proxy agent is not initialized');
     ws.send(JSON.stringify({
@@ -537,7 +482,7 @@ wsServer.on('connection', (ws, request) => {
     return;
   }
   
-  // Обробка URL для підтримки challenge-токену
+  // Обробка URL з challenge-токеном
   const parsedUrl = url.parse(request.url);
   const pathParts = parsedUrl.pathname.split('/');
   
@@ -569,7 +514,6 @@ wsServer.on('connection', (ws, request) => {
     ws.on('message', (message) => {
       try {
         if (kahootWs.readyState === WebSocket.OPEN) {
-          // Логування повідомлень для діагностики (можна вимкнути в продакшн)
           const logSize = 200;
           const msgStr = message.toString();
           const logMsg = msgStr.length > logSize ? 
@@ -587,7 +531,6 @@ wsServer.on('connection', (ws, request) => {
     kahootWs.on('message', (message) => {
       try {
         if (ws.readyState === WebSocket.OPEN) {
-          // Логування повідомлень
           const logSize = 200;
           const msgStr = message.toString();
           const logMsg = msgStr.length > logSize ? 
