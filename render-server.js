@@ -1,10 +1,9 @@
-// Проксі-сервер для обходу обмежень CORS при роботі з Kahoot API
-// Оптимізовано для розгортання на Render.com
 const express = require('express');
 const cors = require('cors');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const WebSocket = require('ws');
+const https = require('https');
 const http = require('http');
 const url = require('url');
 const fs = require('fs');
@@ -53,7 +52,7 @@ const PROXY_CONFIG = {
 // Створення Express додатку
 const app = express();
 app.use(cors({
-  origin: '*', // Дозволяємо запити з будь-якого джерела
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
@@ -143,7 +142,7 @@ app.get('/proxy-info', (req, res) => {
   });
 });
 
-// Додаємо кінцеву точку для перевірки роботи проксі
+// Кінцева точка для перевірки роботи проксі
 app.get('/test-proxy', async (req, res) => {
   console.log('Тестування проксі...');
   
@@ -218,7 +217,6 @@ app.get('/test-proxy', async (req, res) => {
 
 // Налаштування проксі для запитів до Kahoot API
 app.use('/kahoot-api', (req, res, next) => {
-  // Перевірка чи проксі налаштовано
   if (!PROXY_CONFIG.host || !PROXY_CONFIG.port) {
     return res.status(503).json({ 
       error: 'Service Unavailable', 
@@ -226,7 +224,6 @@ app.use('/kahoot-api', (req, res, next) => {
     });
   }
   
-  // Створення проксі-middleware динамічно
   const proxyMiddleware = createProxyMiddleware({
     target: 'https://kahoot.it',
     changeOrigin: true,
@@ -234,23 +231,26 @@ app.use('/kahoot-api', (req, res, next) => {
       '^/kahoot-api': ''
     },
     agent: httpsAgent,
-    onProxyReq: (proxyReq, req, res) => {
-      // Логування запитів
-      console.log(`Proxying request to: ${req.method} ${req.path}`);
+    onProxyReq: (proxyReq, req) => {
+      console.log(`Proxying request: ${req.method} ${req.url}`);
     },
     onProxyRes: (proxyRes, req, res) => {
-      // Встановлення заголовків CORS
+      console.log(`Proxy response: ${proxyRes.statusCode} ${JSON.stringify(proxyRes.headers)}`);
+      let data = '';
+      proxyRes.on('data', (chunk) => { data += chunk; });
+      proxyRes.on('end', () => {
+        console.log(`Proxy response body: ${data}`);
+      });
       proxyRes.headers['Access-Control-Allow-Origin'] = '*';
       proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
       proxyRes.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept, Authorization';
     },
     onError: (err, req, res) => {
-      console.error('Proxy error:', err);
+      console.error(`Proxy error: ${err.message}`);
       res.status(500).json({ error: 'Proxy Error', message: err.message });
     }
   });
   
-  // Виконання створеного middleware
   return proxyMiddleware(req, res, next);
 });
 
@@ -275,8 +275,6 @@ app.get('/kahoot-api/reserve/session/:pin', async (req, res) => {
     
     console.log(`Отримання токену сесії для PIN: ${pin}`);
     
-    // Виконуємо запит до Kahoot через проксі
-    const https = require('https');
     const kahootUrl = `https://kahoot.it/reserve/session/${pin}/`;
     
     const response = await new Promise((resolve, reject) => {
@@ -288,9 +286,7 @@ app.get('/kahoot-api/reserve/session/:pin', async (req, res) => {
         }
       }, (resp) => {
         let data = '';
-        resp.on('data', (chunk) => {
-          data += chunk;
-        });
+        resp.on('data', (chunk) => { data += chunk; });
         resp.on('end', () => {
           if (resp.statusCode >= 200 && resp.statusCode < 300) {
             try {
@@ -336,7 +332,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// Додаткові маршрути для моніторингу здоров'я сервера (використовується Render)
+// Маршрут для моніторингу здоров'я сервера
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
@@ -367,7 +363,6 @@ const wsServer = new WebSocket.Server({ noServer: true });
 server.on('upgrade', (request, socket, head) => {
   const pathname = url.parse(request.url).pathname;
   
-  // Лише для WebSocket запитів до Kahoot
   if (pathname.startsWith('/kahoot-ws')) {
     wsServer.handleUpgrade(request, socket, head, (ws) => {
       wsServer.emit('connection', ws, request);
@@ -379,7 +374,6 @@ server.on('upgrade', (request, socket, head) => {
 
 // Обробка WebSocket з'єднань
 wsServer.on('connection', (ws, request) => {
-  // Перевірка чи проксі налаштовано
   if (!PROXY_CONFIG.host || !PROXY_CONFIG.port) {
     console.error('WebSocket connection attempt, but proxy is not configured');
     ws.send(JSON.stringify({
@@ -395,17 +389,16 @@ wsServer.on('connection', (ws, request) => {
   
   console.log(`WebSocket connection established, proxying to: ${kahootWsUrl}`);
   
-  // Створення WebSocket з'єднання до Kahoot
   const kahootWs = new WebSocket(kahootWsUrl, {
-    agent: httpsAgent
+    agent: httpsAgent,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
   });
   
-  // Передача повідомлень від клієнта до Kahoot
   ws.on('message', (message) => {
     try {
       if (kahootWs.readyState === WebSocket.OPEN) {
-        // Логування повідомлень для діагностики (можна вимкнути в продакшн)
-        // Якщо повідомлення надто велике, логуємо лише початок
         const logSize = 200;
         const msgStr = message.toString();
         const logMsg = msgStr.length > logSize ? 
@@ -419,11 +412,9 @@ wsServer.on('connection', (ws, request) => {
     }
   });
   
-  // Передача повідомлень від Kahoot до клієнта
   kahootWs.on('message', (message) => {
     try {
       if (ws.readyState === WebSocket.OPEN) {
-        // Логування повідомлень
         const logSize = 200;
         const msgStr = message.toString();
         const logMsg = msgStr.length > logSize ? 
@@ -437,7 +428,6 @@ wsServer.on('connection', (ws, request) => {
     }
   });
   
-  // Закриття з'єднань при розірванні одного з них
   ws.on('close', (code, reason) => {
     console.log(`Client WebSocket closed. Code: ${code}, Reason: ${reason || 'None'}`);
     kahootWs.close();
@@ -448,7 +438,6 @@ wsServer.on('connection', (ws, request) => {
     ws.close();
   });
   
-  // Обробка помилок
   ws.on('error', (error) => {
     console.error('Client WebSocket error:', error);
   });
