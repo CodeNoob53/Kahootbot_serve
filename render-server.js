@@ -169,6 +169,13 @@ app.get('/test-proxy', async (req, res) => {
       });
       
       testReq.on('error', (err) => reject(err));
+      
+      // Set timeout for the request
+      testReq.setTimeout(10000, () => {
+        testReq.destroy();
+        reject(new Error('Request to proxy timed out'));
+      });
+      
       testReq.end();
     });
     
@@ -204,7 +211,7 @@ app.get('/test-proxy', async (req, res) => {
     });
   } catch (error) {
     console.error('Помилка тестування проксі:', error.message);
-    return res.status(500).json({
+    return res.status(503).json({
       success: false,
       message: `Помилка тестування проксі: ${error.message}`,
       testResponse: {
@@ -394,6 +401,10 @@ wsServer.on('connection', (ws, request) => {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
+  });
+
+  kahootWs.on('open', () => {
+    console.log(`WebSocket connected to Kahoot: ${kahootWsUrl}`);
   });
   
   ws.on('message', (message) => {
