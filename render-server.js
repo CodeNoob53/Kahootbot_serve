@@ -7,12 +7,17 @@ const HttpsProxyAgent = require('https-proxy-agent');
 const WebSocket = require('ws');
 const http = require('http');
 const url = require('url');
-const dotenv = require('dotenv');
 const fs = require('fs');
 const path = require('path');
 
 // Завантаження змінних середовища
-dotenv.config();
+try {
+  const dotenv = require('dotenv');
+  dotenv.config();
+  console.log('dotenv успішно завантажено');
+} catch (error) {
+  console.log('dotenv не знайдено, використовуємо змінні середовища за замовчуванням');
+}
 
 // Створення файлу .env якщо він не існує (для локальної розробки)
 try {
@@ -33,42 +38,6 @@ PORT=3000
   }
 } catch (error) {
   console.warn('Error creating .env file:', error.message);
-}
-
-// Перевірка наявності необхідних пакетів
-try {
-  const packageJsonPath = path.join(__dirname, 'package.json');
-  let packageJson;
-  
-  if (fs.existsSync(packageJsonPath)) {
-    packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-  } else {
-    console.log('Creating package.json file');
-    packageJson = {
-      "name": "kahoot-proxy-server",
-      "version": "1.0.0",
-      "description": "Проксі-сервер для обходу обмежень CORS при роботі з Kahoot API",
-      "main": "render-server.js",
-      "scripts": {
-        "start": "node render-server.js",
-        "dev": "nodemon render-server.js"
-      },
-      "dependencies": {
-        "cors": "^2.8.5",
-        "dotenv": "^16.0.0",
-        "express": "^4.17.3",
-        "http-proxy-middleware": "^2.0.4",
-        "https-proxy-agent": "^5.0.1",
-        "ws": "^8.5.0"
-      },
-      "devDependencies": {
-        "nodemon": "^2.0.15"
-      }
-    };
-    fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
-  }
-} catch (error) {
-  console.warn('Error checking/creating package.json:', error.message);
 }
 
 // Налаштування проксі з змінних середовища або порожні значення
