@@ -294,74 +294,72 @@ app.use('/kahoot-api', (req, res, next) => {
 app.get('/kahoot-api/reserve/session/:pin', async (req, res) => {
   try {
     const { pin } = req.params;
-    
+
     if (!pin || !/^\d{6,10}$/.test(pin)) {
       return res.status(400).json({
         error: 'Invalid PIN',
         message: 'PIN повинен містити від 6 до 10 цифр'
       });
     }
-    
+
     if (!PROXY_CONFIG.host || !PROXY_CONFIG.port) {
       return res.status(503).json({
         error: 'Proxy Not Configured',
         message: 'Налаштуйте проксі перед виконанням запитів до Kahoot'
       });
     }
-    
-    // Перевірка, чи доступний httpsAgent
+
     if (!httpsAgent) {
       return res.status(503).json({
         error: 'Service Unavailable',
         message: 'Проксі-агент не ініціалізовано. Спробуйте перезапустити сервер.'
       });
     }
-    
+
     console.log(`Отримання токену сесії для PIN: ${pin}`);
-    
-    // Виконуємо запит до Kahoot через проксі
+
     const https = require('https');
     const kahootUrl = `https://kahoot.it/reserve/session/${pin}/`;
-    
+
     const response = await new Promise((resolve, reject) => {
       const req = https.request(kahootUrl, {
         method: 'GET',
         agent: httpsAgent,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
         }
       }, (resp) => {
         let data = '';
-        resp.on('data', (chunk) => {
-          data += chunk;
-        });
+        resp.on('data', (chunk) => { data += chunk; });
         resp.on('end', () => {
           if (resp.statusCode >= 200 && resp.statusCode < 300) {
             try {
               const parsed = JSON.parse(data);
               resolve(parsed);
             } catch (e) {
-              reject(new Error(`Неможливо розібрати відповідь: ${e.message}`));
+              console.error('JSON parse error:', e.message);
+              reject({ statusCode: 502, message: `Неможливо розібрати відповідь: ${e.message}` });
             }
           } else {
-            reject(new Error(`HTTP помилка: ${resp.statusCode} ${resp.statusMessage}`));
+            console.warn(`Kahoot відповів статусом ${resp.statusCode}: ${resp.statusMessage}`);
+            reject({ statusCode: resp.statusCode, message: resp.statusMessage });
           }
         });
       });
-      
+
       req.on('error', (error) => {
-        reject(error);
+        reject({ statusCode: 502, message: error.message });
       });
-      
+
       req.end();
     });
-    
+
     console.log(`Отримано токен сесії для PIN ${pin}`);
-    
     return res.json(response);
   } catch (error) {
-    console.error(`Помилка отримання токену сесії: ${error.message}`);
-    return res.status(500).json({
+    const status = error.statusCode || 500;
+    console.error(`Помилка отримання токену сесії (HTTP ${status}): ${error.message}`);
+    return res.status(status).json({
       error: 'Session Token Error',
       message: error.message
     });
