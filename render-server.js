@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 // Виправлений імпорт HttpsProxyAgent
-const HttpsProxyAgent = require('https-proxy-agent');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 const WebSocket = require('ws');
 const http = require('http');
 const url = require('url');
@@ -85,7 +85,7 @@ function createProxyAgent() {
 
   try {
     // 🟢 Ось ключ: використовуємо "new"
-    return new HttpsProxyAgent(proxyUrl);
+    return HttpsProxyAgent(proxyUrl);
   } catch (e) {
     console.error('❌ Помилка створення агента:', e.message);
     return null;
