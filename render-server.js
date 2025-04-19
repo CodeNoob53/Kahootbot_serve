@@ -503,7 +503,8 @@ wsServer.on('connection', (ws, request) => {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.93 Safari/537.36',
         'Origin': 'https://kahoot.it',
-        'Referer': 'https://kahoot.it/'
+        'Referer': 'https://kahoot.it/',
+        'Cookie': 'kahoot-session=1; player=true; session-id=' + Math.random().toString(36).substring(2)
       }
     };
     
