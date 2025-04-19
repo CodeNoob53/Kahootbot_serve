@@ -84,12 +84,14 @@ function createProxyAgent() {
   console.log('🔒 Побудований проксі URL:', proxyUrl);
 
   try {
-    return HttpsProxyAgent(proxyUrl);
+    // 🟢 Ось ключ: використовуємо "new"
+    return new HttpsProxyAgent(proxyUrl);
   } catch (e) {
     console.error('❌ Помилка створення агента:', e.message);
     return null;
   }
 }
+
 
 // Ініціалізація HTTPS агента для проксі
 let httpsAgent = null;
