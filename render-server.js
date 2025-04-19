@@ -71,31 +71,29 @@ app.use((req, res, next) => {
 })
 
 // Функція для створення HTTPS агента з поточними налаштуваннями проксі
-function createProxyAgent () {
+function createProxyAgent() {
   if (!PROXY_CONFIG.host || !PROXY_CONFIG.port) {
-    console.log('Проксі не налаштовано.')
-    return null
+    console.log('Проксі не налаштовано.');
+    return null;
   }
-
-  const authStr =
-    PROXY_CONFIG.auth.username && PROXY_CONFIG.auth.password
-      ? `${PROXY_CONFIG.auth.username}:${PROXY_CONFIG.auth.password}`
-      : ''
-
+  const authStr = PROXY_CONFIG.auth.username
+    ? `${PROXY_CONFIG.auth.username}:${PROXY_CONFIG.auth.password}`
+    : '';
   const proxyUrl = authStr
     ? `http://${authStr}@${PROXY_CONFIG.host}:${PROXY_CONFIG.port}`
-    : `http://${PROXY_CONFIG.host}:${PROXY_CONFIG.port}`
+    : `http://${PROXY_CONFIG.host}:${PROXY_CONFIG.port}`;
 
-  console.log('🔒 Побудований проксі URL:', proxyUrl)
+  console.log('🔒 Побудований проксі URL:', proxyUrl);
 
   try {
-    // 🟢 Виправлено: додано ключове слово 'new'
-    return new HttpsProxyAgent(proxyUrl)
+    // Тепер – новий конструктор
+    return new HttpsProxyAgent(proxyUrl);
   } catch (e) {
-    console.error('❌ Помилка створення агента:', e.message)
-    return null
+    console.error('❌ Помилка створення агента:', e.message);
+    return null;
   }
 }
+
 
 // Ініціалізація HTTPS агента для проксі
 let httpsAgent = null
