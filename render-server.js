@@ -294,6 +294,95 @@ app.use('/kahoot-api', (req, res, next) => {
   return proxyMiddleware(req, res, next);
 });
 
+// Ендпоінт для розшифрування challenge-токену Kahoot
+app.post('/kahoot-api/solve-challenge', (req, res) => {
+  try {
+    const { challenge } = req.body;
+    
+    if (!challenge) {
+      return res.status(400).json({ 
+        error: 'Bad Request', 
+        message: 'Відсутній challenge токен' 
+      });
+    }
+    
+    console.log('Отримано запит на розшифрування challenge-токену');
+    
+    // Отримуємо закодоване повідомлення з виклику decode.call
+    let encodedMessage;
+    try {
+      encodedMessage = challenge.match(/decode\.call\(this,\s*'([^']+)'/)[1];
+    } catch (matchError) {
+      console.error('Помилка отримання закодованого повідомлення:', matchError);
+      return res.status(400).json({ 
+        error: 'Invalid Challenge', 
+        message: 'Не вдалося отримати закодоване повідомлення з challenge' 
+      });
+    }
+    
+    // Отримуємо формулу для обчислення offset
+    let offsetFormula;
+    try {
+      offsetFormula = challenge.match(/var offset\s*=\s*([^;]+);/)[1];
+    } catch (matchError) {
+      console.error('Помилка отримання формули offset:', matchError);
+      return res.status(400).json({
+        error: 'Invalid Challenge',
+        message: 'Не вдалося отримати формулу offset з challenge'
+      });
+    }
+    
+    // Обчислюємо offset
+    let offset = 0;
+    try {
+      // Очищаємо формулу від пробілів, табуляцій та інших неправильних символів
+      const cleanFormula = offsetFormula
+        .replace(/\s+/g, '') // Видаляємо пробіли та табуляції
+        .replace(/\t/g, '')  // Видаляємо табуляції явно
+        .replace(/this\.angular\.isArray|this\.angular\.isObject/g, 'false') // Замінюємо виклики функцій
+        .replace(/console\.log\([^)]+\)/g, ''); // Видаляємо виклики console.log
+      
+      console.log('Очищена формула offset:', cleanFormula);
+      
+      // Безпечне обчислення виразу
+      offset = eval(cleanFormula);
+      console.log('Обчислений offset:', offset);
+    } catch (evalError) {
+      console.error('Помилка обчислення offset:', evalError);
+      
+      // Якщо не вдалося обчислити, спробуємо типове значення
+      offset = 227337; // Типове значення на основі логів та формул
+      console.log('Використовуємо типове значення offset:', offset);
+    }
+    
+    // Функція для розшифрування повідомлення
+    function decodeMessage(message, offset) {
+      let result = '';
+      for (let position = 0; position < message.length; position++) {
+        const char = message.charAt(position);
+        const charCode = char.charCodeAt(0);
+        const newCharCode = (((charCode * (position + 1)) + offset) % 77) + 48;
+        result += String.fromCharCode(newCharCode);
+      }
+      return result;
+    }
+    
+    const decodedToken = decodeMessage(encodedMessage, offset);
+    console.log('Розшифрований токен:', decodedToken);
+    
+    return res.json({
+      success: true,
+      token: decodedToken
+    });
+  } catch (error) {
+    console.error('Помилка обробки challenge:', error);
+    return res.status(500).json({
+      error: 'Internal Server Error',
+      message: 'Помилка обробки challenge: ' + error.message
+    });
+  }
+});
+
 // API для отримання токена сесії з Kahoot
 app.get('/kahoot-api/reserve/session/:pin', async (req, res) => {
   try {
@@ -366,95 +455,6 @@ app.get('/kahoot-api/reserve/session/:pin', async (req, res) => {
     return res.status(status).json({
       error: 'Session Token Error',
       message: error.message
-    });
-  }
-});
-
-// Ендпоінт для розшифрування challenge-токену Kahoot
-app.post('/kahoot-api/solve-challenge', (req, res) => {
-  try {
-    const { challenge } = req.body;
-    
-    if (!challenge) {
-      return res.status(400).json({ 
-        error: 'Bad Request', 
-        message: 'Відсутній challenge токен' 
-      });
-    }
-    
-    console.log('Отримано запит на розшифрування challenge-токену');
-    
-    // Отримуємо закодоване повідомлення з виклику decode.call
-    let encodedMessage;
-    try {
-      encodedMessage = challenge.match(/decode\.call\(this,\s*'([^']+)'/)[1];
-    } catch (matchError) {
-      console.error('Помилка отримання закодованого повідомлення:', matchError);
-      return res.status(400).json({ 
-        error: 'Invalid Challenge', 
-        message: 'Не вдалося отримати закодоване повідомлення з challenge' 
-      });
-    }
-    
-    // Отримуємо формулу для обчислення offset
-    let offsetFormula;
-    try {
-      offsetFormula = challenge.match(/var offset\s*=\s*([^;]+);/)[1];
-    } catch (matchError) {
-      console.error('Помилка отримання формули offset:', matchError);
-      return res.status(400).json({
-        error: 'Invalid Challenge',
-        message: 'Не вдалося отримати формулу offset з challenge'
-      });
-    }
-    
-    // Обчислюємо offset
-    let offset = 0;
-    try {
-      // Очищаємо формулу від пробілів, табуляцій та інших неправильних символів
-      const cleanFormula = offsetFormula
-        .replace(/\s+/g, '') // Видаляємо пробіли та табуляції
-        .replace(/\t/g, '')  // Видаляємо табуляції явно
-        .replace(/this\.angular\.isArray|this\.angular\.isObject/g, 'false') // Замінюємо виклики функцій
-        .replace(/console\.log\([^)]+\)/g, ''); // Видаляємо виклики console.log
-      
-      console.log('Очищена формула offset:', cleanFormula);
-      
-      // Безпечне обчислення виразу
-      offset = eval(cleanFormula);
-      console.log('Обчислений offset:', offset);
-    } catch (evalError) {
-      console.error('Помилка обчислення offset:', evalError);
-      
-      // Якщо не вдалося обчислити, спробуємо типове значення
-      offset = 34935; // Типове значення на основі логів
-      console.log('Використовуємо типове значення offset:', offset);
-    }
-    
-    // Функція для розшифрування повідомлення
-    function decodeMessage(message, offset) {
-      let result = '';
-      for (let position = 0; position < message.length; position++) {
-        const char = message.charAt(position);
-        const charCode = char.charCodeAt(0);
-        const newCharCode = (((charCode * (position + 1)) + offset) % 77) + 48;
-        result += String.fromCharCode(newCharCode);
-      }
-      return result;
-    }
-    
-    const decodedToken = decodeMessage(encodedMessage, offset);
-    console.log('Розшифрований токен:', decodedToken);
-    
-    return res.json({
-      success: true,
-      token: decodedToken
-    });
-  } catch (error) {
-    console.error('Помилка обробки challenge:', error);
-    return res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Помилка обробки challenge: ' + error.message
     });
   }
 });
