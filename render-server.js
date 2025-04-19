@@ -67,31 +67,23 @@ app.use((req, res, next) => {
 });
 
 // Функція для створення HTTPS агента з поточними налаштуваннями проксі
-function createProxyAgent() {
-  if (!PROXY_CONFIG.host || !PROXY_CONFIG.port) {
-    console.log('Проксі не налаштовано. Підключення буде виконано без проксі.');
+function createProxyAgent(proxyConfig) {
+  const { host, port, username, password } = proxyConfig;
+  
+  if (!host || !port) {
+    console.warn('⚠️ Недостатньо даних для створення проксі-агента');
     return null;
   }
-  
+
+  const authStr = username && password ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@` : '';
+  const proxyUrl = `http://${authStr}${host}:${port}`;
+
+  console.log(`🔒 Побудований проксі URL: ${proxyUrl}`);
+
   try {
-    const authStr = PROXY_CONFIG.auth.username && PROXY_CONFIG.auth.password 
-      ? `${PROXY_CONFIG.auth.username}:${PROXY_CONFIG.auth.password}`
-      : '';
-      
-    // Створення проксі-агента з обробкою помилок
-    const proxyUrl = authStr
-    ? `http://${authStr}@${PROXY_CONFIG.host}:${PROXY_CONFIG.port}`
-    : `http://${PROXY_CONFIG.host}:${PROXY_CONFIG.port}`;
-    
-    console.log('Створення проксі-агента з налаштуваннями:', {
-      host: proxyOptions.host,
-      port: proxyOptions.port,
-      hasAuth: Boolean(authStr)
-    });
-    
     return new HttpsProxyAgent(proxyUrl);
-  } catch (error) {
-    console.error('Помилка створення проксі-агента:', error);
+  } catch (err) {
+    console.error('❌ Помилка створення агента:', err);
     return null;
   }
 }
