@@ -78,11 +78,16 @@ function createProxyAgent() {
   
   console.log(`Creating HttpsProxyAgent with host: ${PROXY_CONFIG.host}, port: ${PROXY_CONFIG.port}, auth: ${authStr || 'none'}`);
   
-  return new HttpsProxyAgent({
+  const proxyOptions = {
     host: PROXY_CONFIG.host,
     port: PROXY_CONFIG.port,
-    auth: authStr || undefined
-  });
+    auth: authStr || undefined,
+    headers: authStr ? {
+      'Proxy-Authorization': `Basic ${Buffer.from(authStr).toString('base64')}`
+    } : {}
+  };
+  
+  return new HttpsProxyAgent(proxyOptions);
 }
 
 // Ініціалізація HTTPS агента для проксі
