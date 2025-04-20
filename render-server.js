@@ -7,8 +7,6 @@ const WebSocket = require('ws');
 const http = require('http');
 const https = require('https');
 const url = require('url');
-const fs = require('fs');
-const path = require('path');
 
 // Завантаження змінних середовища
 try {
@@ -317,7 +315,7 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
         } else {
           // Якщо не можемо знайти формулу, використовуємо типове значення
           console.log('Не вдалося знайти формулу offset, використовуємо типове значення');
-          offsetFormula = '400000'; // Типове значення на основі аналізу логів
+          offsetFormula = '18150'; // Оновлене типове значення на основі успішного результату
         }
       } else {
         offsetFormula = offsetMatch[1];
@@ -325,7 +323,7 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
     } catch (matchError) {
       console.error('Помилка отримання формули offset:', matchError);
       // Використовуємо запасне значення
-      offsetFormula = '400000';
+      offsetFormula = '18150';
     }
     
     // Обчислюємо offset
@@ -349,7 +347,7 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
       const evalTimeout = setTimeout(() => {
         if (!evaluated) {
           console.log('Timeout при обчисленні offset, використовуємо типове значення');
-          offset = 400000; // Типове значення при таймауті
+          offset = 18150; // Оновлене типове значення
           evaluated = true;
         }
       }, 1000);
@@ -363,7 +361,7 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
       } catch (evalInnerError) {
         if (!evaluated) {
           console.error('Помилка обчислення: ' + evalInnerError);
-          offset = 400000;
+          offset = 18150;
           evaluated = true;
           clearTimeout(evalTimeout);
         }
@@ -371,9 +369,8 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
     } catch (evalError) {
       console.error('Помилка обчислення offset:', evalError);
       
-      // Якщо не вдалося обчислити, використовуємо статистично найбільш поширені значення
-      const commonOffsets = [230000, 400000, 500000, 600000, 700000];
-      offset = commonOffsets[Math.floor(Math.random() * commonOffsets.length)];
+      // Використовуємо значення, яке працювало в останній раз
+      offset = 18150;
       console.log('Використовуємо типове значення offset:', offset);
     }
     
@@ -390,7 +387,7 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
           const char = message.charAt(position);
           const charCode = char.charCodeAt(0);
           
-          // Математична формула з protection від NaN та Infinity
+          // Математична формула з Kahoot challenge
           let newCharCode = Math.floor((((charCode * (position + 1)) + offset) % 77) + 48);
           
           // Якщо отримали некоректний код - використовуємо запасний
@@ -408,7 +405,7 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
       }
     }
     
-    // Спроба розшифрувати з поточним offset
+    // Спроба розшифрувати з обчисленим offset
     let decodedToken = decodeMessage(encodedMessage, offset);
     console.log('Розшифрований токен:', decodedToken);
     
@@ -416,7 +413,15 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
     if (!decodedToken || decodedToken.length < 10) {
       // Якщо токен недійсний, пробуємо інші значення offset
       console.log('Токен виглядає недійсним, пробуємо альтернативні offset');
-      const alternativeOffsets = [300000, 400000, 500000, 600000, 700000];
+      
+      // Масив типових значень offset, які часто зустрічаються
+      const alternativeOffsets = [
+        18150, // Значення, яке спрацювало раніше
+        16050, 
+        17150, 
+        19200, 
+        20250
+      ];
       
       for (const altOffset of alternativeOffsets) {
         if (altOffset === offset) continue; // Пропускаємо вже перевірений offset
@@ -424,8 +429,8 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
         const altToken = decodeMessage(encodedMessage, altOffset);
         console.log(`Альтернативний токен (offset=${altOffset}):`, altToken);
         
-        // Якщо альтернативний токен виглядає краще
-        if (altToken && altToken.length > 10) {
+        // Якщо альтернативний токен виглядає кращим
+        if (altToken && altToken.length > 10 && /[A-Za-z0-9]/.test(altToken)) {
           decodedToken = altToken;
           console.log('Використовуємо альтернативний токен');
           break;
@@ -553,10 +558,10 @@ app.use('/kahoot-api', (req, res, next) => {
       '^/kahoot-api': ''
     },
     agent: httpsAgent,
-    onProxyReq: (proxyReq, req, res) => {
+    onProxyReq: (proxyReq, req) => {
       console.log(`Proxying request to: ${req.method} ${req.path}`);
     },
-    onProxyRes: (proxyRes, req, res) => {
+    onProxyRes: (proxyRes) => {
       proxyRes.headers['Access-Control-Allow-Origin'] = '*';
       proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
       proxyRes.headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept, Authorization';
@@ -609,7 +614,7 @@ wsServer.on('connection', (ws, request) => {
     return;
   }
   
-  // Обробка URL з challenge-токеном
+  // Обробка URL з параметрами
   const parsedUrl = url.parse(request.url);
   const pathParts = parsedUrl.pathname.split('/');
   
@@ -618,14 +623,42 @@ wsServer.on('connection', (ws, request) => {
     pathParts.splice(1, 1);
   }
   
-  // Формуємо шлях для Kahoot WebSocket
-  // Важливо: не використовуємо raw challenge-токен, а беремо тільки необхідні параметри
-  // Format: /cometd/{pin}/{sessionToken}
-  // Обмежуємо до 3-х компонентів, щоб уникнути проблем з довгими URL
-  const limitedPath = pathParts.slice(0, 3).join('/');
-  const kahootWsUrl = `wss://kahoot.it${limitedPath}`;
+  // Отримуємо важливі параметри з URL
+  let pin = '';
+  let sessionToken = '';
+  let challengeToken = '';
   
-  console.log(`WebSocket connection established, proxying to: ${kahootWsUrl}`);
+  // Парсимо параметри з URL
+  // Формат має бути: /kahoot-ws/cometd/{pin}/{sessionToken}/{challengeToken}
+  if (pathParts.length >= 4) {
+    pin = pathParts[2];
+    sessionToken = pathParts[3];
+    
+    // Перевіряємо наявність challenge-токену
+    if (pathParts.length >= 5) {
+      // Беремо тільки перші 64 символи challenge-токену, щоб уникнути проблем з форматом
+      challengeToken = pathParts[4].substring(0, 64);
+    }
+  }
+  
+  if (!pin || !sessionToken) {
+    console.error('Invalid WebSocket URL format: missing pin or session token');
+    ws.send(JSON.stringify({
+      error: 'Invalid URL',
+      message: 'URL must contain game pin and session token'
+    }));
+    ws.close();
+    return;
+  }
+  
+  console.log(`WebSocket connection for pin: ${pin}, session: ${sessionToken.substring(0, 10)}...`);
+  
+  // Формуємо правильний URL для Kahoot WebSocket
+  // ВАЖЛИВО: Kahoot очікує URL у форматі /cometd/{pin}/{sessionToken}
+  // без challenge-токену в URL! Токен передається в повідомленні handshake
+  const kahootWsUrl = `wss://kahoot.it/cometd/${pin}/${sessionToken}`;
+  
+  console.log(`Connecting to Kahoot WebSocket: ${kahootWsUrl}`);
   
   try {
     // Встановлюємо додаткові заголовки для з'єднання з Kahoot
@@ -639,20 +672,12 @@ wsServer.on('connection', (ws, request) => {
       }
     };
     
-    // Додаємо cookie та інші необхідні параметри
-    const cookies = [
-      'kahoot-session=1', 
-      'player=true', 
-      'session-id=' + Math.random().toString(36).substring(2),
-      'AWSALB=' + Math.random().toString(36).substring(2)
-    ];
-    
-    wsOptions.headers['Cookie'] = cookies.join('; ');
-    
     // Створення WebSocket з'єднання до Kahoot
     const kahootWs = new WebSocket(kahootWsUrl, wsOptions);
     
     let isConnectionEstablished = false;
+    let clientHandshakeReceived = false;
+    let challengeTokenToUse = challengeToken;
     
     // Обробник успішного підключення
     kahootWs.on('open', () => {
@@ -660,20 +685,61 @@ wsServer.on('connection', (ws, request) => {
       isConnectionEstablished = true;
     });
     
-    // Передача повідомлень від клієнта до Kahoot
+    // Передача повідомлень від клієнта до Kahoot з модифікацією
     ws.on('message', (message) => {
       try {
         if (kahootWs.readyState === WebSocket.OPEN) {
-          const logSize = 200;
+          // Конвертуємо повідомлення в рядок
           const msgStr = message.toString();
-          const logMsg = msgStr.length > logSize ? 
-            msgStr.substring(0, logSize) + '...' : msgStr;
-          console.log(`WS Client → Kahoot: ${logMsg}`);
           
+          // Парсимо повідомлення для логування та модифікації
+          let msgObject;
+          try {
+            msgObject = JSON.parse(msgStr);
+          } catch (parseError) {
+            // Якщо не можна розпарсити як JSON, надсилаємо як є
+            console.log(`WS Client → Kahoot: Raw message (${msgStr.length} bytes)`);
+            kahootWs.send(message);
+            return;
+          }
+          
+          // Якщо це масив повідомлень
+          if (Array.isArray(msgObject)) {
+            // Перевіряємо перше повідомлення на handshake
+            if (msgObject.length > 0 && msgObject[0].channel === '/meta/handshake') {
+              clientHandshakeReceived = true;
+              console.log('Handshake message detected, adding challenge token if available');
+              
+              // Додаємо challenge-токен до handshake повідомлення, якщо він є
+              if (challengeTokenToUse) {
+                // Перевіряємо структуру повідомлення
+                if (!msgObject[0].ext) {
+                  msgObject[0].ext = {};
+                }
+                
+                // Додаємо токен в ext.challenge
+                msgObject[0].ext.challenge = challengeTokenToUse;
+                console.log(`Added challenge token to handshake: ${challengeTokenToUse.substring(0, 10)}...`);
+              }
+              
+              // Перетворюємо назад у рядок
+              const modifiedMsg = JSON.stringify(msgObject);
+              console.log(`WS Client → Kahoot: Modified handshake message (${modifiedMsg.length} bytes)`);
+              kahootWs.send(modifiedMsg);
+              return;
+            }
+          }
+          
+          // Для всіх інших повідомлень
+          console.log(`WS Client → Kahoot: Message (${msgStr.length} bytes)`);
           kahootWs.send(message);
         }
       } catch (error) {
-        console.error('Error sending message to Kahoot:', error);
+        console.error('Error processing client message:', error);
+        // Спробуємо надіслати оригінальне повідомлення без модифікацій
+        if (kahootWs.readyState === WebSocket.OPEN) {
+          kahootWs.send(message);
+        }
       }
     });
     
@@ -681,12 +747,26 @@ wsServer.on('connection', (ws, request) => {
     kahootWs.on('message', (message) => {
       try {
         if (ws.readyState === WebSocket.OPEN) {
-          const logSize = 200;
           const msgStr = message.toString();
-          const logMsg = msgStr.length > logSize ? 
-            msgStr.substring(0, logSize) + '...' : msgStr;
-          console.log(`WS Kahoot → Client: ${logMsg}`);
           
+          // Спробуємо розпарсити для логування
+          try {
+            const msgObject = JSON.parse(msgStr);
+            // Якщо це handshake відповідь, логуємо це
+            if (Array.isArray(msgObject) && msgObject.length > 0 && msgObject[0].channel === '/meta/handshake') {
+              console.log('Received handshake response from Kahoot');
+              // Перевіряємо успішність
+              if (msgObject[0].successful) {
+                console.log('Handshake successful, client ID:', msgObject[0].clientId);
+              } else {
+                console.error('Handshake failed:', msgObject[0].error || 'Unknown error');
+              }
+            }
+          } catch (e) {
+            // Ігноруємо помилки парсингу для логування
+          }
+          
+          console.log(`WS Kahoot → Client: Message (${msgStr.length} bytes)`);
           ws.send(message);
         }
       } catch (error) {
@@ -716,6 +796,7 @@ wsServer.on('connection', (ws, request) => {
     
     kahootWs.on('error', (error) => {
       console.error('Kahoot WebSocket error:', error);
+      
       try {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
@@ -735,15 +816,13 @@ wsServer.on('connection', (ws, request) => {
     // Обробка помилки з'єднання
     kahootWs.on('unexpected-response', (request, response) => {
       console.error(`Unexpected response from Kahoot: ${response.statusCode} ${response.statusMessage}`);
-      
-      // Логування всіх заголовків відповіді для діагностики
       console.log('Response headers:', response.headers);
       
       // Збір даних з відповіді для діагностики
       let body = '';
       response.on('data', (chunk) => { body += chunk; });
       response.on('end', () => {
-        console.log('Response body:', body.substring(0, 1000)); // Перші 1000 символів відповіді
+        console.log('Response body:', body.substring(0, 1000));
         
         try {
           if (ws.readyState === WebSocket.OPEN) {
@@ -758,8 +837,16 @@ wsServer.on('connection', (ws, request) => {
         }
       });
       
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
+      // Якщо отримали 403, спробуємо перепідключитися без challenge-токену
+      if (response.statusCode === 403 && challengeTokenToUse && !clientHandshakeReceived) {
+        console.log('Received 403, retrying without challenge token...');
+        challengeTokenToUse = '';
+        
+        // Не закриваємо з'єднання з клієнтом, щоб мати можливість повторити спробу
+      } else {
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+        }
       }
     });
     
@@ -767,11 +854,16 @@ wsServer.on('connection', (ws, request) => {
     const connectionTimeout = setTimeout(() => {
       if (!isConnectionEstablished) {
         console.error('Connection timeout to Kahoot WebSocket');
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            error: 'Connection timeout',
-            message: 'Failed to establish connection to Kahoot server'
-          }));
+        
+        try {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              error: 'Connection timeout',
+              message: 'Failed to establish connection to Kahoot server'
+            }));
+          }
+        } catch (e) {
+          console.error('Error sending timeout message to client:', e);
         }
         
         if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
@@ -790,6 +882,7 @@ wsServer.on('connection', (ws, request) => {
     });
   } catch (error) {
     console.error('Error creating WebSocket connection to Kahoot:', error);
+    
     try {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
