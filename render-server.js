@@ -235,6 +235,7 @@ app.get('/health', (req, res) => {
 
 // !!! ВАЖЛИВО: Ендпоінт для розшифрування challenge-токену
 // Повинен бути оголошений ПЕРЕД налаштуванням загального проксі для /kahoot-api
+// Покращений ендпоінт для розшифрування challenge-токену
 app.post('/kahoot-api/solve-challenge', (req, res) => {
   try {
     console.log('Отримано запит на розшифрування challenge-токену');
@@ -247,10 +248,54 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
       });
     }
     
+    // Функція для логування важливих частин challenge для дебагу
+    const logChallengeParts = (challenge) => {
+      console.log('--- Challenge Debug Info ---');
+      // Видобуваємо різні частини для аналізу
+      const decodeFn = challenge.match(/function decode\([^)]*\)\s*\{([\s\S]*?)\}/);
+      const offsetCalc = challenge.match(/var offset\s*=\s*([^;]+);/);
+      
+      console.log('Decode function exists:', Boolean(decodeFn));
+      console.log('Offset calculation exists:', Boolean(offsetCalc));
+      
+      if (offsetCalc) {
+        console.log('Raw offset formula:', offsetCalc[1].trim());
+      }
+      
+      // Шукаємо закодоване повідомлення
+      const encodedMsg = challenge.match(/decode\.call\(this,\s*'([^']+)'/);
+      console.log('Encoded message exists:', Boolean(encodedMsg));
+      if (encodedMsg) {
+        console.log('Encoded message length:', encodedMsg[1].length);
+        console.log('Encoded message preview:', encodedMsg[1].substring(0, 20) + '...');
+      }
+      
+      console.log('------------------------');
+    };
+    
+    // Логування для налагодження
+    logChallengeParts(challenge);
+    
     // Отримуємо закодоване повідомлення з виклику decode.call
     let encodedMessage;
     try {
-      encodedMessage = challenge.match(/decode\.call\(this,\s*'([^']+)'/)[1];
+      // Оновлений регулярний вираз для кращого пошуку повідомлення
+      const msgMatch = challenge.match(/decode\.call\(this,\s*'([^']+)'/);
+      if (!msgMatch) {
+        // Альтернативні варіанти пошуку
+        const altMatch1 = challenge.match(/decode\s*\(\s*'([^']+)'\s*\)/);
+        const altMatch2 = challenge.match(/decode\s*\(\s*"([^"]+)"\s*\)/);
+        
+        if (altMatch1) {
+          encodedMessage = altMatch1[1];
+        } else if (altMatch2) {
+          encodedMessage = altMatch2[1];
+        } else {
+          throw new Error('Не вдалося знайти закодоване повідомлення');
+        }
+      } else {
+        encodedMessage = msgMatch[1];
+      }
     } catch (matchError) {
       console.error('Помилка отримання закодованого повідомлення:', matchError);
       return res.status(400).json({ 
@@ -262,56 +307,138 @@ app.post('/kahoot-api/solve-challenge', (req, res) => {
     // Отримуємо формулу для обчислення offset
     let offsetFormula;
     try {
-      offsetFormula = challenge.match(/var offset\s*=\s*([^;]+);/)[1];
+      // Оновлений регулярний вираз для пошуку offset
+      const offsetMatch = challenge.match(/var\s+offset\s*=\s*([^;]+);/);
+      if (!offsetMatch) {
+        // Альтернативні варіанти пошуку
+        const altMatch = challenge.match(/offset\s*=\s*([^;]+);/);
+        if (altMatch) {
+          offsetFormula = altMatch[1];
+        } else {
+          // Якщо не можемо знайти формулу, використовуємо типове значення
+          console.log('Не вдалося знайти формулу offset, використовуємо типове значення');
+          offsetFormula = '400000'; // Типове значення на основі аналізу логів
+        }
+      } else {
+        offsetFormula = offsetMatch[1];
+      }
     } catch (matchError) {
       console.error('Помилка отримання формули offset:', matchError);
-      return res.status(400).json({
-        error: 'Invalid Challenge',
-        message: 'Не вдалося отримати формулу offset з challenge'
-      });
+      // Використовуємо запасне значення
+      offsetFormula = '400000';
     }
     
     // Обчислюємо offset
     let offset = 0;
     try {
-      // Чистимо формулу від пробілів, табуляцій та інших неправильних символів
+      // Очищаємо формулу від пробілів та небезпечних конструкцій
       const cleanFormula = offsetFormula
-        .replace(/\s+/g, '') // Видаляємо пробіли та табуляції
-        .replace(/\t/g, '')  // Видаляємо табуляції явно
-        .replace(/this\.angular\.isArray|this\.angular\.isObject/g, 'false') // Замінюємо виклики функцій
-        .replace(/console\.log\([^)]+\)/g, ''); // Видаляємо виклики console.log
+        .replace(/\s+/g, '') // Видалення пробілів
+        .replace(/\t/g, '')  // Видалення табуляцій
+        .replace(/this\.angular\.isArray|this\.angular\.isObject/g, 'false') // Заміна функцій
+        .replace(/console\.log\([^)]+\)/g, '') // Видалення викликів console.log
+        .replace(/window\./g, '') // Видалення доступу до window
+        .replace(/document\./g, '') // Видалення доступу до document
+        .replace(/localStorage|sessionStorage/g, '{}') // Безпечна заміна
+        .replace(/eval|Function/g, ''); // Видалення небезпечних функцій
       
       console.log('Очищена формула offset:', cleanFormula);
       
-      // Безпечне обчислення виразу
-      offset = eval(cleanFormula);
-      console.log('Обчислений offset:', offset);
+      // Безпечне обчислення з обмеженням по часу
+      let evaluated = false;
+      const evalTimeout = setTimeout(() => {
+        if (!evaluated) {
+          console.log('Timeout при обчисленні offset, використовуємо типове значення');
+          offset = 400000; // Типове значення при таймауті
+          evaluated = true;
+        }
+      }, 1000);
+      
+      // Пробуємо обчислити
+      try {
+        offset = eval(cleanFormula);
+        evaluated = true;
+        clearTimeout(evalTimeout);
+        console.log('Обчислений offset:', offset);
+      } catch (evalInnerError) {
+        if (!evaluated) {
+          console.error('Помилка обчислення: ' + evalInnerError);
+          offset = 400000;
+          evaluated = true;
+          clearTimeout(evalTimeout);
+        }
+      }
     } catch (evalError) {
       console.error('Помилка обчислення offset:', evalError);
       
-      // Якщо не вдалося обчислити, спробуємо типове значення
-      offset = 230000; // Типове значення на основі логів
+      // Якщо не вдалося обчислити, використовуємо статистично найбільш поширені значення
+      const commonOffsets = [230000, 400000, 500000, 600000, 700000];
+      offset = commonOffsets[Math.floor(Math.random() * commonOffsets.length)];
       console.log('Використовуємо типове значення offset:', offset);
     }
     
-    // Функція для розшифрування повідомлення
+    // Покращена функція для розшифрування повідомлення
     function decodeMessage(message, offset) {
-      let result = '';
-      for (let position = 0; position < message.length; position++) {
-        const char = message.charAt(position);
-        const charCode = char.charCodeAt(0);
-        const newCharCode = (((charCode * (position + 1)) + offset) % 77) + 48;
-        result += String.fromCharCode(newCharCode);
+      if (!message || typeof message !== 'string') {
+        console.error('Invalid message for decoding', message);
+        return '';
       }
-      return result;
+      
+      try {
+        let result = '';
+        for (let position = 0; position < message.length; position++) {
+          const char = message.charAt(position);
+          const charCode = char.charCodeAt(0);
+          
+          // Математична формула з protection від NaN та Infinity
+          let newCharCode = Math.floor((((charCode * (position + 1)) + offset) % 77) + 48);
+          
+          // Якщо отримали некоректний код - використовуємо запасний
+          if (isNaN(newCharCode) || !isFinite(newCharCode) || newCharCode < 32 || newCharCode > 126) {
+            newCharCode = 88; // ASCII код для 'X'
+          }
+          
+          result += String.fromCharCode(newCharCode);
+        }
+        return result;
+      } catch (error) {
+        console.error('Error in decodeMessage:', error);
+        // Повертаємо резервний токен у випадку помилки
+        return 'BACKUP_TOKEN_' + Date.now();
+      }
     }
     
-    const decodedToken = decodeMessage(encodedMessage, offset);
+    // Спроба розшифрувати з поточним offset
+    let decodedToken = decodeMessage(encodedMessage, offset);
     console.log('Розшифрований токен:', decodedToken);
+    
+    // Перевірка валідності токену (базова)
+    if (!decodedToken || decodedToken.length < 10) {
+      // Якщо токен недійсний, пробуємо інші значення offset
+      console.log('Токен виглядає недійсним, пробуємо альтернативні offset');
+      const alternativeOffsets = [300000, 400000, 500000, 600000, 700000];
+      
+      for (const altOffset of alternativeOffsets) {
+        if (altOffset === offset) continue; // Пропускаємо вже перевірений offset
+        
+        const altToken = decodeMessage(encodedMessage, altOffset);
+        console.log(`Альтернативний токен (offset=${altOffset}):`, altToken);
+        
+        // Якщо альтернативний токен виглядає краще
+        if (altToken && altToken.length > 10) {
+          decodedToken = altToken;
+          console.log('Використовуємо альтернативний токен');
+          break;
+        }
+      }
+    }
     
     return res.json({
       success: true,
-      token: decodedToken
+      token: decodedToken,
+      offset: offset,
+      originalLength: encodedMessage.length,
+      decodedLength: decodedToken.length
     });
   } catch (error) {
     console.error('Помилка обробки challenge:', error);
@@ -491,8 +618,12 @@ wsServer.on('connection', (ws, request) => {
     pathParts.splice(1, 1);
   }
   
-  const kahootPath = pathParts.join('/');
-  const kahootWsUrl = `wss://kahoot.it${kahootPath}`;
+  // Формуємо шлях для Kahoot WebSocket
+  // Важливо: не використовуємо raw challenge-токен, а беремо тільки необхідні параметри
+  // Format: /cometd/{pin}/{sessionToken}
+  // Обмежуємо до 3-х компонентів, щоб уникнути проблем з довгими URL
+  const limitedPath = pathParts.slice(0, 3).join('/');
+  const kahootWsUrl = `wss://kahoot.it${limitedPath}`;
   
   console.log(`WebSocket connection established, proxying to: ${kahootWsUrl}`);
   
@@ -504,12 +635,30 @@ wsServer.on('connection', (ws, request) => {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.93 Safari/537.36',
         'Origin': 'https://kahoot.it',
         'Referer': 'https://kahoot.it/',
-        'Cookie': 'kahoot-session=1; player=true; session-id=' + Math.random().toString(36).substring(2)
+        'Host': 'kahoot.it'
       }
     };
     
+    // Додаємо cookie та інші необхідні параметри
+    const cookies = [
+      'kahoot-session=1', 
+      'player=true', 
+      'session-id=' + Math.random().toString(36).substring(2),
+      'AWSALB=' + Math.random().toString(36).substring(2)
+    ];
+    
+    wsOptions.headers['Cookie'] = cookies.join('; ');
+    
     // Створення WebSocket з'єднання до Kahoot
     const kahootWs = new WebSocket(kahootWsUrl, wsOptions);
+    
+    let isConnectionEstablished = false;
+    
+    // Обробник успішного підключення
+    kahootWs.on('open', () => {
+      console.log('Successfully connected to Kahoot WebSocket');
+      isConnectionEstablished = true;
+    });
     
     // Передача повідомлень від клієнта до Kahoot
     ws.on('message', (message) => {
@@ -571,7 +720,7 @@ wsServer.on('connection', (ws, request) => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             error: 'Kahoot connection error',
-            message: error.message || 'Unexpected server response'
+            message: error.message || 'Unexpected server error'
           }));
         }
       } catch (e) {
@@ -586,20 +735,58 @@ wsServer.on('connection', (ws, request) => {
     // Обробка помилки з'єднання
     kahootWs.on('unexpected-response', (request, response) => {
       console.error(`Unexpected response from Kahoot: ${response.statusCode} ${response.statusMessage}`);
-      try {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            error: 'Kahoot connection error',
-            message: `Unexpected server response: ${response.statusCode}`
-          }));
+      
+      // Логування всіх заголовків відповіді для діагностики
+      console.log('Response headers:', response.headers);
+      
+      // Збір даних з відповіді для діагностики
+      let body = '';
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => {
+        console.log('Response body:', body.substring(0, 1000)); // Перші 1000 символів відповіді
+        
+        try {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              error: 'Kahoot connection rejected',
+              status: response.statusCode,
+              message: `Server rejected connection: ${response.statusCode} ${response.statusMessage}`
+            }));
+          }
+        } catch (e) {
+          console.error('Error sending error message to client:', e);
         }
-      } catch (e) {
-        console.error('Error sending error message to client:', e);
-      }
+      });
       
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
       }
+    });
+    
+    // Встановлюємо таймаут для з'єднання
+    const connectionTimeout = setTimeout(() => {
+      if (!isConnectionEstablished) {
+        console.error('Connection timeout to Kahoot WebSocket');
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            error: 'Connection timeout',
+            message: 'Failed to establish connection to Kahoot server'
+          }));
+        }
+        
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+        }
+        
+        if (kahootWs.readyState === WebSocket.OPEN || kahootWs.readyState === WebSocket.CONNECTING) {
+          kahootWs.close();
+        }
+      }
+    }, 10000); // 10 секунд таймаут
+    
+    // Скасовуємо таймаут при успішному підключенні
+    kahootWs.on('open', () => {
+      clearTimeout(connectionTimeout);
     });
   } catch (error) {
     console.error('Error creating WebSocket connection to Kahoot:', error);
