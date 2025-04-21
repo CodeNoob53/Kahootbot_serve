@@ -56,22 +56,23 @@ function getRandomUserAgent() {
 
 // Функція для генерації cookies для запиту
 function generateKahootCookies() {
-  const uuid = generateUUID()
-  const now = new Date()
-  const nowIsoStr = now.toISOString()
-  const encodedDate = encodeURIComponent(now.toString())
-  const consentId = generateUUID()
+  const uuid = crypto.randomUUID?.() || generateUUID();
+  const now = new Date();
+  const nowIsoStr = now.toISOString();
+  const consentId = generateUUID();
+  const dateStr = encodeURIComponent(now.toUTCString());
 
   return [
     `generated_uuid=${uuid}`,
     `OptanonAlertBoxClosed=${nowIsoStr}`,
-    `OptanonConsent=isGpcEnabled=0&datestamp=${encodedDate}&version=202411.1.0&browserGpcFlag=0&isIABGlobal=false&hosts=&consentId=${consentId}&interactionCount=1&isAnonUser=1&landingPath=NotLandingPage&groups=C0001%3A1%2CC0002%3A0%2CC0003%3A0%2CC0004%3A0&intType=3`,
-    'deviceId=' + Math.random().toString(36).substring(2),
-    'AWSALB=' + Math.random().toString(36).substring(2),
-    'player=true',
-    'session-id=' + Math.random().toString(36).substring(2)
-  ]
+    `OptanonConsent=isGpcEnabled=0&datestamp=${dateStr}&version=202411.1.0&browserGpcFlag=0&isIABGlobal=false&hosts=&consentId=${consentId}&interactionCount=1&isAnonUser=1&landingPath=NotLandingPage&groups=C0001%3A1%2CC0002%3A0%2CC0003%3A0%2CC0004%3A0&intType=3`,
+    `deviceId=${uuid.replace(/-/g, '')}`,
+    `AWSALB=${Math.random().toString(36).substring(2)}`,
+    `session-id=${Math.random().toString(36).substring(2)}`,
+    `player=true`
+  ];
 }
+
 
 // Функція для створення HTTPS агента з проксі
 function createProxyAgent() {
@@ -464,6 +465,25 @@ app.get('/test-proxy', async (req, res) => {
     })
   }
 })
+
+app.get('/test-cookies', (req, res) => {
+  try {
+    const cookies = generateKahootCookies();
+
+    res.json({
+      success: true,
+      message: 'Сформовані куки для емуляції браузера',
+      cookies
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Помилка при генерації cookies',
+      error: error.message
+    });
+  }
+});
+
 
 // --- KAHOOT API ENDPOINTS ---
 
