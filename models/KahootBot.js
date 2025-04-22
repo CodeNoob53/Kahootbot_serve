@@ -33,37 +33,27 @@ class KahootBot {
   async connectWebSocket() {
     return new Promise((resolve, reject) => {
       try {
-        // Додайте опцію для прямого з'єднання без проксі
         const useProxy = this.config && this.config.bypassProxy === true ? false : true;
-  
-        // Формуємо URL для WebSocket з'єднання
-        // Додаємо випадковий параметр для обходу кешування
-        const randomParam = Date.now() + Math.floor(Math.random() * 10000);
-        wsUrl += `?_=${randomParam}`;        
-        let encodedToken = this.challengeToken ? encodeURIComponent(this.challengeToken) : null;
-        let wsUrl = encodedToken
-          ? `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}/${encodedToken}`
-          : `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}`;     
-        
-        wsUrl += `?_=${randomParam}`;
-        
-        console.log(`WS: Connecting to ${wsUrl} ${useProxy ? 'with proxy' : 'directly'}`);
-        
-        // Отримуємо проксі агент (якщо налаштований і не обходимо)
         const agent = useProxy ? proxyUtils.getProxyAgent() : null;
+  
+        // Формуємо безпечний WS URL
+        let wsUrl = this.challengeToken
+          ? `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}/${encodeURIComponent(this.challengeToken)}`
+          : `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}`;
+        
+        const randomParam = Date.now() + Math.floor(Math.random() * 10000);
+        wsUrl += `?_=${randomParam}`;
+  
+        console.log(`WS: Connecting to ${wsUrl} ${useProxy ? 'with proxy' : 'directly'}`);
         this.log(`WS: Proxy agent: ${agent ? 'Yes' : 'No'}`);
-        
-        // Генеруємо випадковий User-Agent
+  
         const userAgent = this.kahootService.getRandomUserAgent();
-        
-        // Налаштовуємо заголовки, які більш точно імітують браузер
         const headers = {
           'User-Agent': userAgent,
           'Origin': 'https://kahoot.it',
           'Referer': `https://kahoot.it/join?gameId=${this.pin}&source=web`,
           'Accept-Language': 'en-US,en;q=0.9',
           'Accept': '*/*',
-          'Accept-Encoding': 'gzip, deflate, br',
           'Cache-Control': 'no-cache',
           'Pragma': 'no-cache',
           'Sec-WebSocket-Version': '13',
@@ -73,59 +63,49 @@ class KahootBot {
           'Sec-Fetch-Site': 'same-origin',
           'Host': 'kahoot.it'
         };
-        
-        // Додаємо cookie до заголовків (з випадковими значеннями)
+  
         const cookies = this.kahootService.generateKahootCookies();
-        if (cookies && cookies.length > 0) {
+        if (cookies.length > 0) {
           headers['Cookie'] = cookies.join('; ');
           console.log(`WS: Added ${cookies.length} cookies`);
         }
-        
-        // Конфігуруємо опції для WebSocket
+  
         const options = {
           headers,
           agent,
-          handshakeTimeout: 15000,   // Збільшуємо таймаут рукостискання
-          perMessageDeflate: true    // Включаємо стиснення повідомлень
+          handshakeTimeout: 15000,
+          perMessageDeflate: true
         };
-        
-        console.log(`WS: Using WebSocket with proxy: ${Boolean(agent)}`);
-        
-        // Додаємо випадкову затримку, щоб імітувати поведінку реального клієнта
+  
         setTimeout(() => {
           try {
-            // Створюємо WebSocket з'єднання
             this.socket = new WebSocket(wsUrl, options);
-            
-            // Налаштовуємо обробники подій для WebSocket
             this.socket.on('open', () => {
               console.log('WS: Connection established successfully');
               this.connected = true;
-              
-              // Імітуємо деяку затримку перед надсиланням handshake
+  
               setTimeout(() => {
                 this.sendHandshake();
                 resolve(true);
               }, Math.floor(Math.random() * 300) + 100);
             });
-            
+  
             this.socket.on('message', (message) => {
               console.log(`WS: Received message of length ${message.length}`);
               this.handleSocketMessage(message);
             });
-            
+  
             this.socket.on('error', (error) => {
               console.error(`WS ERROR: ${error.message}`);
               this.connected = false;
               reject(error);
             });
-            
+  
             this.socket.on('close', (code, reason) => {
               console.log(`WS CLOSED: ${code} ${reason || 'No reason'}`);
               this.connected = false;
             });
-            
-            // Встановлюємо таймаут для з'єднання
+  
             const connectionTimeout = setTimeout(() => {
               console.error(`WS TIMEOUT: Connection timeout`);
               if (this.socket && this.socket.readyState !== WebSocket.OPEN) {
@@ -133,11 +113,11 @@ class KahootBot {
                 reject(new Error('Connection timeout'));
               }
             }, 15000);
-            
-            // Очищаємо таймаут при успішному з'єднанні
+  
             this.socket.once('open', () => {
               clearTimeout(connectionTimeout);
             });
+  
           } catch (wsError) {
             console.error(`WS CREATION ERROR: ${wsError.message}`);
             reject(wsError);
