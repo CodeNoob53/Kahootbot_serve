@@ -39,9 +39,11 @@ class KahootBot {
         // Формуємо URL для WebSocket з'єднання
         // Додаємо випадковий параметр для обходу кешування
         const randomParam = Date.now() + Math.floor(Math.random() * 10000);
-        let wsUrl = this.challengeToken
-          ? `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}/${this.challengeToken}`
-          : `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}`;
+        wsUrl += `?_=${randomParam}`;        
+        let encodedToken = this.challengeToken ? encodeURIComponent(this.challengeToken) : null;
+        let wsUrl = encodedToken
+          ? `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}/${encodedToken}`
+          : `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}`;     
         
         wsUrl += `?_=${randomParam}`;
         
