@@ -26,7 +26,44 @@ class BotManager {
       
       const bot = new KahootBot(config);
       
-      // Start the bot
+      // Start the bot - перевіряємо наявність методу connect
+      if (typeof bot.connect !== 'function') {
+        logger.error(`Bot ${config.id} does not have connect method`);
+        
+        // Перевіряємо, чи має бот інші можливі методи
+        const availableMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(bot))
+          .filter(method => typeof bot[method] === 'function' && method !== 'constructor');
+        
+        logger.info(`Available methods: ${availableMethods.join(', ')}`);
+        
+        // Якщо є метод connectWebSocket, можливо потрібно змінити підхід
+        if (typeof bot.connectWebSocket === 'function') {
+          logger.info(`Trying to use connectWebSocket instead`);
+          try {
+            await bot.connectWebSocket();
+            this.bots.set(config.id, bot);
+            
+            logger.info(`Bot ${config.id} connected using connectWebSocket`);
+            return {
+              success: true,
+              message: 'Bot connected successfully using connectWebSocket'
+            };
+          } catch (wsError) {
+            logger.error(`Failed to connect with connectWebSocket: ${wsError.message}`);
+            return {
+              success: false,
+              message: `Failed to connect: ${wsError.message}`
+            };
+          }
+        }
+        
+        return {
+          success: false,
+          message: 'bot.connect is not a function'
+        };
+      }
+      
+      // Викликаємо метод connect якщо він доступний
       const connected = await bot.connect();
       
       if (!connected) {

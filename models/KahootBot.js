@@ -133,85 +133,69 @@ class KahootBot {
     });
   }
   
-  async connectWebSocket() {
-    return new Promise((resolve, reject) => {
+/**
+ * Встановлює з'єднання з грою Kahoot
+ * @returns {Promise<boolean>} Результат підключення
+ */
+async connect() {
+    try {
+      console.log(`CONNECTING: Bot ${this.id} attempting to connect to PIN: ${this.pin}`);
+      
+      // Validate PIN format
+      if (!this.pin || !/^\d{6,10}$/.test(this.pin)) {
+        console.log(`INVALID PIN: ${this.pin} is not valid`);
+        return false;
+      }
+      
+      console.log("Getting session token...");
+      // Get session token
       try {
-        const wsUrl = this.challengeToken
-          ? `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}/${this.challengeToken}`
-          : `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}`;
+        const sessionData = await this.kahootService.getSession(this.pin);
+        console.log(`SESSION DATA: ${JSON.stringify(sessionData)}`);
         
-        console.log(`WS: Connecting to ${wsUrl}`);
-        
-        // Get agent for proxy if configured
-        const agent = proxyUtils.getProxyAgent();
-        this.log(`WS: Proxy agent: ${agent ? 'Yes' : 'No'}`);
-        
-        const headers = {
-          'User-Agent': this.kahootService.getRandomUserAgent(),
-          'Origin': 'https://kahoot.it',
-          'Referer': `https://kahoot.it/join?gameId=${this.pin}`
-        };
-        
-        // Add cookies to headers
-        const cookies = this.kahootService.generateKahootCookies();
-        if (cookies && cookies.length > 0) {
-          headers['Cookie'] = cookies.join('; ');
-          console.log(`WS: Added ${cookies.length} cookies`);
+        if (!sessionData || !sessionData.liveGameId) {
+          console.log("SESSION ERROR: No liveGameId in session data");
+          throw new Error('Failed to get game session token');
         }
         
-        const options = {
-          headers,
-          agent
-        };
+        this.sessionToken = sessionData.liveGameId;
+        console.log(`SESSION SUCCESS: Got token ${this.sessionToken.substring(0, 10)}...`);
         
-        // Уникаємо JSON.stringify для циклічного об'єкта
-        console.log(`WS: Using WebSocket with proxy: ${Boolean(agent)}`);
-        
-        this.socket = new WebSocket(wsUrl, options);
-        
-        // Setup event handlers
-        this.socket.on('open', () => {
-          console.log('WS: Connection established');
-          this.connected = true;
-          this.sendHandshake();
-          resolve(true);
-        });
-        
-        this.socket.on('message', (message) => {
-          console.log(`WS: Received message of length ${message.length}`);
-          this.handleSocketMessage(message);
-        });
-        
-        this.socket.on('error', (error) => {
-          console.error(`WS ERROR: ${error.message}`);
-          this.connected = false;
-          reject(error);
-        });
-        
-        this.socket.on('close', (code, reason) => {
-          console.log(`WS CLOSED: ${code} ${reason || 'No reason'}`);
-          this.connected = false;
-        });
-        
-        // Set timeout for connection
-        const connectionTimeout = setTimeout(() => {
-          console.error(`WS TIMEOUT: Connection timeout`);
-          if (this.socket && this.socket.readyState !== WebSocket.OPEN) {
-            this.socket.terminate();
-            reject(new Error('Connection timeout'));
+        // If there's a challenge, solve it
+        if (sessionData.challenge) {
+          this.log('Challenge detected, solving...', 'info');
+          console.log('CHALLENGE: Detected, attempting to solve');
+          
+          try {
+            this.challengeToken = await this.kahootService.solveChallenge(sessionData.challenge);
+            
+            if (!this.challengeToken) {
+              console.log('CHALLENGE ERROR: Failed to solve challenge');
+              throw new Error('Failed to solve challenge token');
+            }
+            
+            console.log(`CHALLENGE SUCCESS: Got token ${this.challengeToken.substring(0, 10)}...`);
+          } catch (challengeError) {
+            console.error(`CHALLENGE ERROR DETAILS: ${challengeError.message}`);
+            throw challengeError;
           }
-        }, 15000);
+        }
         
-        // Clear timeout when connected
-        this.socket.once('open', () => {
-          clearTimeout(connectionTimeout);
-        });
-      } catch (error) {
-        console.error(`WS SETUP ERROR: ${error.message}`);
-        console.error(`WS SETUP STACK: ${error.stack}`);
-        reject(error);
+        // Connect WebSocket
+        console.log('Connecting WebSocket...');
+        await this.connectWebSocket();
+        
+        return true;
+      } catch (sessionError) {
+        console.error(`SESSION ERROR DETAILS: ${sessionError.message}`);
+        console.error(`SESSION ERROR STACK: ${sessionError.stack}`);
+        throw sessionError;
       }
-    });
+    } catch (error) {
+      console.error(`CONNECT ERROR: ${error.message}`);
+      console.error(`CONNECT STACK: ${error.stack}`);
+      return false;
+    }
   }
   
   sendHandshake() {
