@@ -1,4 +1,4 @@
-// routes/api.js
+// routes/api.js (оновлення для додавання тестового ендпоінту)
 const express = require('express');
 const router = express.Router();
 const botController = require('../controllers/botController');
@@ -14,5 +14,8 @@ router.get('/bots', botController.getAllBots);
 router.post('/set-proxy', proxyController.setProxy);
 router.get('/test-proxy', proxyController.testProxy);
 router.get('/proxy-status', proxyController.getProxyStatus);
+
+// Test routes
+router.get('/test-kahoot/:pin', botController.testKahoot);
 
 module.exports = router;

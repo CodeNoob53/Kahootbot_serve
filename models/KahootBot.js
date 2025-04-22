@@ -1,6 +1,5 @@
-// models/KahootBot.js (спрощена версія для першого етапу)
+// models/KahootBot.js (спрощена версія)
 const WebSocket = require('ws');
-const logger = require('../utils/logger');
 const proxyUtils = require('../utils/proxyUtils');
 const KahootService = require('../services/KahootService');
 
@@ -17,7 +16,7 @@ class KahootBot {
     this.currentQuestion = null;
     this.currentQuestionIndex = 0;
     this.lastAnswer = null;
-    this.logCallback = config.onLog || logger.info;
+    this.logCallback = config.onLog || console.log;
     
     this.kahootService = new KahootService();
     
@@ -26,49 +25,68 @@ class KahootBot {
   
   log(message, type = 'info') {
     if (this.logCallback) {
-      this.logCallback(`[Bot ${this.id}] ${message}`, type);
+      this.logCallback(message, type);
     }
-    logger[type](`[Bot ${this.id}] ${message}`);
+    console.log(`[Bot ${this.id}] [${type}] ${message}`);
   }
   
   async connect() {
     try {
-      this.log('Connecting to Kahoot game...');
+      console.log(`CONNECTING: Bot ${this.id} attempting to connect to PIN: ${this.pin}`);
       
       // Validate PIN format
       if (!this.pin || !/^\d{6,10}$/.test(this.pin)) {
-        this.log('Invalid PIN format', 'error');
+        console.log(`INVALID PIN: ${this.pin} is not valid`);
         return false;
       }
       
+      console.log("Getting session token...");
       // Get session token
-      const sessionData = await this.kahootService.getSession(this.pin);
-      
-      if (!sessionData || !sessionData.liveGameId) {
-        throw new Error('Failed to get game session token');
-      }
-      
-      this.sessionToken = sessionData.liveGameId;
-      this.log(`Got session token: ${this.sessionToken.substring(0, 10)}...`);
-      
-      // If there's a challenge, solve it
-      if (sessionData.challenge) {
-        this.log('Challenge detected, solving...');
-        this.challengeToken = await this.kahootService.solveChallenge(sessionData.challenge);
+      try {
+        const sessionData = await this.kahootService.getSession(this.pin);
+        console.log(`SESSION DATA: ${JSON.stringify(sessionData)}`);
         
-        if (!this.challengeToken) {
-          throw new Error('Failed to solve challenge token');
+        if (!sessionData || !sessionData.liveGameId) {
+          console.log("SESSION ERROR: No liveGameId in session data");
+          throw new Error('Failed to get game session token');
         }
         
-        this.log(`Got challenge token: ${this.challengeToken.substring(0, 10)}...`);
+        this.sessionToken = sessionData.liveGameId;
+        console.log(`SESSION SUCCESS: Got token ${this.sessionToken.substring(0, 10)}...`);
+        
+        // If there's a challenge, solve it
+        if (sessionData.challenge) {
+          this.log('Challenge detected, solving...', 'info');
+          console.log('CHALLENGE: Detected, attempting to solve');
+          
+          try {
+            this.challengeToken = await this.kahootService.solveChallenge(sessionData.challenge);
+            
+            if (!this.challengeToken) {
+              console.log('CHALLENGE ERROR: Failed to solve challenge');
+              throw new Error('Failed to solve challenge token');
+            }
+            
+            console.log(`CHALLENGE SUCCESS: Got token ${this.challengeToken.substring(0, 10)}...`);
+          } catch (challengeError) {
+            console.error(`CHALLENGE ERROR DETAILS: ${challengeError.message}`);
+            throw challengeError;
+          }
+        }
+        
+        // Connect WebSocket
+        console.log('Connecting WebSocket...');
+        await this.connectWebSocket();
+        
+        return true;
+      } catch (sessionError) {
+        console.error(`SESSION ERROR DETAILS: ${sessionError.message}`);
+        console.error(`SESSION ERROR STACK: ${sessionError.stack}`);
+        throw sessionError;
       }
-      
-      // Connect WebSocket
-      await this.connectWebSocket();
-      
-      return true;
     } catch (error) {
-      this.log(`Connection error: ${error.message}`, 'error');
+      console.error(`CONNECT ERROR: ${error.message}`);
+      console.error(`CONNECT STACK: ${error.stack}`);
       return false;
     }
   }
@@ -80,8 +98,12 @@ class KahootBot {
           ? `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}/${this.challengeToken}`
           : `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}`;
         
+        console.log(`WS: Connecting to ${wsUrl}`);
+        
         // Get agent for proxy if configured
         const agent = proxyUtils.getProxyAgent();
+        console.log(`WS: Proxy agent: ${agent ? 'Yes' : 'No'}`);
+        
         const headers = {
           'User-Agent': this.kahootService.getRandomUserAgent(),
           'Origin': 'https://kahoot.it',
@@ -92,6 +114,7 @@ class KahootBot {
         const cookies = this.kahootService.generateKahootCookies();
         if (cookies && cookies.length > 0) {
           headers['Cookie'] = cookies.join('; ');
+          console.log(`WS: Added ${cookies.length} cookies`);
         }
         
         const options = {
@@ -99,47 +122,50 @@ class KahootBot {
           agent
         };
         
-        this.log(`Connecting WebSocket to: ${wsUrl}`);
+        console.log(`WS: Using options: ${JSON.stringify(options, null, 2)}`);
+        
         this.socket = new WebSocket(wsUrl, options);
         
         // Setup event handlers
         this.socket.on('open', () => {
-          this.log('WebSocket connection established');
+          console.log('WS: Connection established');
           this.connected = true;
           this.sendHandshake();
           resolve(true);
         });
         
         this.socket.on('message', (message) => {
+          console.log(`WS: Received message of length ${message.length}`);
           this.handleSocketMessage(message);
         });
         
         this.socket.on('error', (error) => {
-          this.log(`WebSocket error: ${error.message}`, 'error');
+          console.error(`WS ERROR: ${error.message}`);
           this.connected = false;
           reject(error);
         });
         
         this.socket.on('close', (code, reason) => {
-          this.log(`WebSocket closed: ${code} ${reason || 'No reason'}`, 'warn');
+          console.log(`WS CLOSED: ${code} ${reason || 'No reason'}`);
           this.connected = false;
         });
         
         // Set timeout for connection
         const connectionTimeout = setTimeout(() => {
-          this.log('Connection timeout', 'error');
+          console.error(`WS TIMEOUT: Connection timeout`);
           if (this.socket && this.socket.readyState !== WebSocket.OPEN) {
             this.socket.terminate();
             reject(new Error('Connection timeout'));
           }
-        }, 10000);
+        }, 15000);
         
         // Clear timeout when connected
         this.socket.once('open', () => {
           clearTimeout(connectionTimeout);
         });
       } catch (error) {
-        this.log(`WebSocket setup error: ${error.message}`, 'error');
+        console.error(`WS SETUP ERROR: ${error.message}`);
+        console.error(`WS SETUP STACK: ${error.stack}`);
         reject(error);
       }
     });
@@ -169,82 +195,104 @@ class KahootBot {
     // Add challenge token if available
     if (this.challengeToken) {
       handshakeMsg.ext.challenge = this.challengeToken;
+      console.log(`HANDSHAKE: Added challenge token`);
     }
     
+    console.log(`HANDSHAKE: Sending handshake message`);
     this.sendSocketMessage([handshakeMsg]);
-    this.log('Handshake sent');
   }
   
   sendSocketMessage(message) {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      this.log('Cannot send message: WebSocket not open', 'error');
+      console.error(`SOCKET ERROR: Cannot send message - WebSocket not open`);
       return false;
     }
     
     try {
-      this.socket.send(JSON.stringify(message));
+      const msgStr = JSON.stringify(message);
+      console.log(`SOCKET SEND: Sending message of length ${msgStr.length}`);
+      this.socket.send(msgStr);
       return true;
     } catch (error) {
-      this.log(`Error sending message: ${error.message}`, 'error');
+      console.error(`SOCKET SEND ERROR: ${error.message}`);
       return false;
     }
   }
   
   handleSocketMessage(message) {
     try {
-      const msgData = JSON.parse(message);
+      console.log(`SOCKET RECEIVE: Processing message`);
+      
+      let msgData;
+      try {
+        msgData = JSON.parse(message);
+        console.log(`SOCKET RECEIVE: Parsed message successfully`);
+      } catch (parseError) {
+        console.error(`SOCKET PARSE ERROR: ${parseError.message}`);
+        return;
+      }
       
       // Handle multiple messages in an array
       if (Array.isArray(msgData)) {
+        console.log(`SOCKET RECEIVE: Processing ${msgData.length} messages`);
         msgData.forEach(msg => this.processMessage(msg));
       } else {
+        console.log(`SOCKET RECEIVE: Processing single message`);
         this.processMessage(msgData);
       }
     } catch (error) {
-      this.log(`Error processing message: ${error.message}`, 'error');
+      console.error(`SOCKET PROCESSING ERROR: ${error.message}`);
     }
   }
   
   processMessage(message) {
-    const { channel, data, clientId, successful, error } = message;
-    
-    // Handle handshake response
-    if (channel === '/meta/handshake' && successful) {
-      this.clientId = clientId;
-      this.log(`Handshake successful. ClientId: ${this.clientId}`);
-      this.subscribeToChannels();
-    }
-    
-    // Handle subscription response
-    if (channel === '/meta/subscribe' && successful) {
-      this.log('Successfully subscribed to channel');
+    try {
+      const { channel, data, clientId, successful, error } = message;
       
-      // Register user after subscription
-      if (!this.userRegistered) {
-        this.registerUser();
-      }
-    }
-    
-    // On the first stage, we just log game messages
-    if (channel === '/service/player') {
-      this.log(`Game message received: ${JSON.stringify(data)}`);
+      console.log(`PROCESS: Message on channel: ${channel}`);
       
-      // Only update basic state
-      if (data && data.type === 'question') {
-        this.currentQuestionIndex++;
-        this.currentQuestion = data.question;
-        this.log(`Question received (not answering): ${data.question}`);
+      // Handle handshake response
+      if (channel === '/meta/handshake' && successful) {
+        this.clientId = clientId;
+        console.log(`HANDSHAKE SUCCESS: ClientId: ${this.clientId}`);
+        this.subscribeToChannels();
       }
-    }
-    
-    // Handle errors
-    if (error) {
-      this.log(`Server error: ${error}`, 'error');
+      
+      // Handle subscription response
+      if (channel === '/meta/subscribe' && successful) {
+        console.log(`SUBSCRIBE SUCCESS: Subscribed to ${message.subscription}`);
+        
+        // Register user after last subscription
+        if (!this.userRegistered && message.subscription === '/service/controller') {
+          this.registerUser();
+        }
+      }
+      
+      // On the first stage, we just log game messages
+      if (channel === '/service/player') {
+        console.log(`GAME MESSAGE: ${JSON.stringify(data)}`);
+        
+        // Only update basic state
+        if (data && data.type === 'question') {
+          this.currentQuestionIndex++;
+          this.currentQuestion = data.question;
+          console.log(`QUESTION: #${this.currentQuestionIndex} - ${data.question}`);
+        }
+      }
+      
+      // Handle errors
+      if (error) {
+        console.error(`SERVER ERROR: ${error}`);
+      }
+    } catch (processError) {
+      console.error(`PROCESS ERROR: ${processError.message}`);
     }
   }
   
   subscribeToChannels() {
     const channels = ['/service/player', '/service/status', '/service/controller'];
+    
+    console.log(`SUBSCRIBE: Subscribing to ${channels.length} channels`);
     
     channels.forEach(channel => {
       const subscribeMsg = {
@@ -255,7 +303,7 @@ class KahootBot {
       };
       
       this.sendSocketMessage([subscribeMsg]);
-      this.log(`Subscribing to channel: ${channel}`);
+      console.log(`SUBSCRIBE: Sent subscription for ${channel}`);
     });
   }
   
@@ -270,14 +318,14 @@ class KahootBot {
       clientId: this.clientId
     };
     
+    console.log(`REGISTER: Sending registration with name ${this.name}`);
     this.sendSocketMessage([registerMsg]);
-    this.log(`Registering with name: ${this.name}`);
     this.userRegistered = true;
   }
   
   async disconnect() {
     try {
-      this.log('Disconnecting...');
+      console.log(`DISCONNECT: Disconnecting bot ${this.id}`);
       
       if (this.socket && this.socket.readyState === WebSocket.OPEN) {
         // Send leave message
@@ -290,18 +338,20 @@ class KahootBot {
           clientId: this.clientId
         };
         
+        console.log(`DISCONNECT: Sending leave message`);
         this.sendSocketMessage([leaveMsg]);
         
         // Close socket
+        console.log(`DISCONNECT: Closing socket`);
         this.socket.close();
       }
       
       this.connected = false;
-      this.log('Disconnected successfully');
+      console.log(`DISCONNECT: Completed`);
       
       return true;
     } catch (error) {
-      this.log(`Error disconnecting: ${error.message}`, 'error');
+      console.error(`DISCONNECT ERROR: ${error.message}`);
       return false;
     }
   }

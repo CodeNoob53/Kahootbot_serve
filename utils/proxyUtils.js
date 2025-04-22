@@ -1,7 +1,5 @@
-// utils/proxyUtils.js
+// utils/proxyUtils.js (спрощена версія)
 const { HttpsProxyAgent } = require('https-proxy-agent');
-const logger = require('./logger');
-const https = require('https');
 
 // Default proxy configuration
 let proxyConfig = {
@@ -26,7 +24,7 @@ function setProxyConfig(config) {
   // Reset agent
   proxyAgent = null;
   
-  logger.info(`Proxy configuration updated: ${proxyConfig.host}:${proxyConfig.port}`);
+  console.log(`Proxy configuration updated: ${proxyConfig.host}:${proxyConfig.port}`);
   
   return proxyConfig;
 }
@@ -38,123 +36,138 @@ function getProxyConfig() {
 
 // Create HTTPS Agent with proxy
 function getProxyAgent() {
-  if (!proxyConfig.host || !proxyConfig.port) {
-    logger.debug('No proxy configured, returning null agent');
-    return null;
-  }
-  
-  if (proxyAgent) {
-    return proxyAgent;
-  }
-  
-  try {
-    const proxyUrl = proxyConfig.username && proxyConfig.password
-      ? `http://${proxyConfig.username}:${proxyConfig.password}@${proxyConfig.host}:${proxyConfig.port}`
-      : `http://${proxyConfig.host}:${proxyConfig.port}`;
+    console.log(`ProxyUtils: Getting proxy agent for ${proxyConfig.host}:${proxyConfig.port}`);
     
-    proxyAgent = new HttpsProxyAgent(proxyUrl);
-    logger.debug(`Created proxy agent for ${proxyConfig.host}:${proxyConfig.port}`);
+    // Тимчасово відключаємо проксі для тестування
+    // console.log("PROXY: Temporarily disabled for testing");
+    // return null;
     
-    return proxyAgent;
-  } catch (error) {
-    logger.error(`Error creating proxy agent: ${error.message}`);
-    return null;
-  }
-}
-
-// Test if proxy is working
-async function testProxy() {
-  return new Promise((resolve) => {
+    if (!proxyConfig.host || !proxyConfig.port) {
+      console.log('ProxyUtils: No proxy configured, returning null agent');
+      return null;
+    }
+    
+    if (proxyAgent) {
+      console.log('ProxyUtils: Returning cached proxy agent');
+      return proxyAgent;
+    }
+    
     try {
-      if (!proxyConfig.host || !proxyConfig.port) {
-        resolve({
-          success: false,
-          message: 'Proxy not configured'
-        });
-        return;
-      }
+      const proxyUrl = proxyConfig.username && proxyConfig.password
+        ? `http://${proxyConfig.username}:${proxyConfig.password}@${proxyConfig.host}:${proxyConfig.port}`
+        : `http://${proxyConfig.host}:${proxyConfig.port}`;
       
-      logger.info(`Testing proxy: ${proxyConfig.host}:${proxyConfig.port}`);
+      console.log(`ProxyUtils: Creating new proxy agent with URL: ${proxyUrl}`);
       
-      // Create agent
-      const agent = getProxyAgent();
+      proxyAgent = new HttpsProxyAgent(proxyUrl);
+      console.log('ProxyUtils: Proxy agent created successfully');
       
-      if (!agent) {
-        resolve({
-          success: false,
-          message: 'Failed to create proxy agent'
-        });
-        return;
-      }
-      
-      // Test URL
-      const testUrl = 'https://kahoot.it/';
-      
-      // Request options
-      const options = {
-        method: 'HEAD',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml'
-        },
-        agent: agent,
-        timeout: 10000
-      };
-      
-      const req = https.request(testUrl, options, (res) => {
-        logger.info(`Proxy test result: Status ${res.statusCode}`);
-        
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve({
-            success: true,
-            message: 'Proxy connection successful',
-            details: {
-              statusCode: res.statusCode,
-              headers: res.headers
-            }
-          });
-        } else {
+      return proxyAgent;
+    } catch (error) {
+      console.error(`ProxyUtils: Error creating proxy agent: ${error.message}`);
+      return null;
+    }
+  }
+ 
+  // Test if proxy is working
+  async function testProxy() {
+    return new Promise((resolve) => {
+      try {
+        if (!proxyConfig.host || !proxyConfig.port) {
+          console.log('ProxyUtils: No proxy configured for testing');
           resolve({
             success: false,
-            message: `Proxy returned status code ${res.statusCode}`,
-            details: {
-              statusCode: res.statusCode
-            }
+            message: 'Proxy not configured'
           });
+          return;
         }
-      });
-      
-      req.on('error', (error) => {
-        logger.error(`Proxy test error: ${error.message}`);
+        
+        console.log(`ProxyUtils: Testing proxy: ${proxyConfig.host}:${proxyConfig.port}`);
+        
+        // Create agent
+        const agent = getProxyAgent();
+        
+        if (!agent) {
+          console.log('ProxyUtils: Failed to create proxy agent for testing');
+          resolve({
+            success: false,
+            message: 'Failed to create proxy agent'
+          });
+          return;
+        }
+        
+        // Test URL
+        const testUrl = 'https://kahoot.it/';
+        
+        // Request options
+        const options = {
+          method: 'HEAD',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml'
+          },
+          agent: agent,
+          timeout: 10000
+        };
+        
+        console.log(`ProxyUtils: Sending test request to ${testUrl}`);
+        
+        const https = require('https');
+        const req = https.request(testUrl, options, (res) => {
+          console.log(`ProxyUtils: Proxy test result: Status ${res.statusCode}`);
+          
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve({
+              success: true,
+              message: 'Proxy connection successful',
+              details: {
+                statusCode: res.statusCode,
+                headers: res.headers
+              }
+            });
+          } else {
+            resolve({
+              success: false,
+              message: `Proxy returned status code ${res.statusCode}`,
+              details: {
+                statusCode: res.statusCode
+              }
+            });
+          }
+        });
+        
+        req.on('error', (error) => {
+          console.error(`ProxyUtils: Proxy test error: ${error.message}`);
+          resolve({
+            success: false,
+            message: `Proxy connection error: ${error.message}`
+          });
+        });
+        
+        req.on('timeout', () => {
+          req.destroy();
+          console.error('ProxyUtils: Proxy test timeout');
+          resolve({
+            success: false,
+            message: 'Proxy connection timeout'
+          });
+        });
+        
+        req.end();
+        console.log('ProxyUtils: Test request sent');
+      } catch (error) {
+        console.error(`ProxyUtils: Error testing proxy: ${error.message}`);
         resolve({
           success: false,
-          message: `Proxy connection error: ${error.message}`
+          message: `Error testing proxy: ${error.message}`
         });
-      });
-      
-      req.on('timeout', () => {
-        req.destroy();
-        logger.error('Proxy test timeout');
-        resolve({
-          success: false,
-          message: 'Proxy connection timeout'
-        });
-      });
-      
-      req.end();
-    } catch (error) {
-      logger.error(`Error testing proxy: ${error.message}`);
-      resolve({
-        success: false,
-        message: `Error testing proxy: ${error.message}`
-      });
-    }
-  });
-}
-
-module.exports = {
-  setProxyConfig,
-  getProxyConfig,
-  getProxyAgent,
-  testProxy
-};
+      }
+    });
+  }
+ 
+  module.exports = {
+    setProxyConfig,
+    getProxyConfig,
+    getProxyAgent,
+    testProxy
+  };

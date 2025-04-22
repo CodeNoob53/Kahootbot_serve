@@ -1,7 +1,6 @@
-// services/KahootService.js
+// services/KahootService.js (спрощена версія)
 const https = require('https');
 const { v4: uuidv4 } = require('uuid');
-const logger = require('../utils/logger');
 const proxyUtils = require('../utils/proxyUtils');
 
 class KahootService {
@@ -40,18 +39,23 @@ class KahootService {
   async getSession(pin) {
     return new Promise((resolve, reject) => {
       try {
-        logger.info(`Getting Kahoot session for PIN: ${pin}`);
+        console.log(`KahootService: Getting session for PIN: ${pin}`);
         
         if (!pin || !/^\d{6,10}$/.test(pin)) {
+          console.log(`KahootService: Invalid game PIN: ${pin}`);
           reject(new Error('Invalid game PIN'));
           return;
         }
         
         const url = `https://kahoot.it/reserve/session/${pin}/`;
+        console.log(`KahootService: Request URL: ${url}`);
+        
         const agent = proxyUtils.getProxyAgent();
+        console.log(`KahootService: Proxy agent created: ${agent ? 'Yes' : 'No'}`);
         
         // Generate cookies
         const cookies = this.generateKahootCookies();
+        console.log(`KahootService: Generated ${cookies.length} cookies`);
         
         const options = {
           method: 'GET',
@@ -66,7 +70,12 @@ class KahootService {
           agent: agent
         };
         
+        console.log(`KahootService: Request options: ${JSON.stringify(options, null, 2)}`);
+        
         const req = https.request(url, options, (res) => {
+          console.log(`KahootService: Response status: ${res.statusCode}`);
+          console.log(`KahootService: Response headers: ${JSON.stringify(res.headers)}`);
+          
           let data = '';
           
           res.on('data', (chunk) => {
@@ -74,30 +83,42 @@ class KahootService {
           });
           
           res.on('end', () => {
+            console.log(`KahootService: Response data length: ${data.length}`);
+            
             if (res.statusCode >= 200 && res.statusCode < 300) {
               try {
                 const result = JSON.parse(data);
-                logger.info(`Successfully got session token for PIN ${pin}`);
+                console.log(`KahootService: Parsed response: ${JSON.stringify(result)}`);
                 resolve(result);
               } catch (error) {
-                logger.error(`Error parsing session response: ${error.message}`);
+                console.error(`KahootService: Error parsing response: ${error.message}`);
+                console.error(`KahootService: Raw response data: ${data}`);
                 reject(new Error('Invalid response format'));
               }
             } else {
-              logger.error(`Failed to get session: HTTP ${res.statusCode}`);
+              console.error(`KahootService: HTTP error: ${res.statusCode}`);
+              console.error(`KahootService: Response data: ${data}`);
               reject(new Error(`HTTP error: ${res.statusCode}`));
             }
           });
         });
         
         req.on('error', (error) => {
-          logger.error(`Request error: ${error.message}`);
+          console.error(`KahootService: Request error: ${error.message}`);
           reject(error);
         });
         
+        // Додайте таймаут для запиту
+        req.setTimeout(15000, () => {
+          console.error(`KahootService: Request timeout`);
+          req.destroy(new Error('Request timeout'));
+        });
+        
         req.end();
+        console.log(`KahootService: Request sent`);
       } catch (error) {
-        logger.error(`Error in getSession: ${error.message}`);
+        console.error(`KahootService: General error: ${error.message}`);
+        console.error(`KahootService: Stack: ${error.stack}`);
         reject(error);
       }
     });
@@ -106,33 +127,41 @@ class KahootService {
   async solveChallenge(challenge) {
     return new Promise((resolve, reject) => {
       try {
-        logger.info('Solving Kahoot challenge token');
+        console.log('KahootService: Solving challenge token');
         
         if (!challenge) {
+          console.log('KahootService: No challenge provided');
           reject(new Error('No challenge token provided'));
           return;
         }
+        
+        console.log(`KahootService: Challenge length: ${challenge.length}`);
         
         // Extract the encoded message
         let encodedMessage;
         try {
           const msgMatch = challenge.match(/decode\.call\(this,\s*'([^']+)'/);
           if (!msgMatch) {
+            console.log('KahootService: Using alternative regex for encoded message');
             const altMatch1 = challenge.match(/decode\s*\(\s*'([^']+)'\s*\)/);
             const altMatch2 = challenge.match(/decode\s*\(\s*"([^"]+)"\s*\)/);
             
             if (altMatch1) {
               encodedMessage = altMatch1[1];
+              console.log(`KahootService: Found encoded message (alt1) of length ${encodedMessage.length}`);
             } else if (altMatch2) {
               encodedMessage = altMatch2[1];
+              console.log(`KahootService: Found encoded message (alt2) of length ${encodedMessage.length}`);
             } else {
+              console.error('KahootService: Could not find encoded message');
               throw new Error('Could not find encoded message');
             }
           } else {
             encodedMessage = msgMatch[1];
+            console.log(`KahootService: Found encoded message of length ${encodedMessage.length}`);
           }
         } catch (error) {
-          logger.error(`Error extracting encoded message: ${error.message}`);
+          console.error(`KahootService: Error extracting encoded message: ${error.message}`);
           reject(error);
           return;
         }
@@ -143,6 +172,8 @@ class KahootService {
           const offsetMatch = challenge.match(/var\s+offset\s*=\s*([^;]+);/);
           const formula = offsetMatch ? offsetMatch[1] : '18150'; // Default if not found
           
+          console.log(`KahootService: Offset formula: ${formula}`);
+          
           // Clean formula
           const cleanFormula = formula
             .replace(/\s+/g, '')
@@ -151,36 +182,43 @@ class KahootService {
             .replace(/window\.|document\.|localStorage|sessionStorage/g, '')
             .replace(/eval|Function/g, '');
           
+          console.log(`KahootService: Cleaned formula: ${cleanFormula}`);
+          
           offset = eval(cleanFormula); // Safe in controlled server environment
+          console.log(`KahootService: Calculated offset: ${offset}`);
         } catch (error) {
-          logger.error(`Error calculating offset: ${error.message}`);
+          console.error(`KahootService: Error calculating offset: ${error.message}`);
           offset = 18150; // Fallback value
+          console.log(`KahootService: Using fallback offset: ${offset}`);
         }
         
         // Decode message
         const decodedToken = this.decodeMessage(encodedMessage, offset);
+        console.log(`KahootService: Decoded token length: ${decodedToken.length}`);
         
         if (!decodedToken || decodedToken.length < 10) {
-          logger.warn('Decoded token appears invalid, using alternative offset');
+          console.log('KahootService: Decoded token appears invalid, trying alternatives');
           
           // Try alternative offsets
           const alternativeOffsets = [18150, 16050, 17150, 19200, 20250];
           for (const altOffset of alternativeOffsets) {
             if (altOffset === offset) continue;
             
+            console.log(`KahootService: Trying alternative offset: ${altOffset}`);
             const altToken = this.decodeMessage(encodedMessage, altOffset);
+            
             if (altToken && altToken.length > 10 && /[A-Za-z0-9]/.test(altToken)) {
-              logger.info(`Using alternative token with offset ${altOffset}`);
+              console.log(`KahootService: Using alternative token with offset ${altOffset}, length ${altToken.length}`);
               resolve(altToken);
               return;
             }
           }
         }
         
-        logger.info('Successfully decoded challenge token');
+        console.log('KahootService: Successfully decoded challenge token');
         resolve(decodedToken);
       } catch (error) {
-        logger.error(`Error solving challenge: ${error.message}`);
+        console.error(`KahootService: Error solving challenge: ${error.message}`);
         reject(error);
       }
     });
@@ -188,6 +226,7 @@ class KahootService {
   
   decodeMessage(message, offset) {
     try {
+      console.log(`KahootService: Decoding message of length ${message.length} with offset ${offset}`);
       let result = '';
       for (let position = 0; position < message.length; position++) {
         const char = message.charAt(position);
@@ -203,9 +242,11 @@ class KahootService {
         
         result += String.fromCharCode(newCharCode);
       }
+      
+      console.log(`KahootService: Decoded result length: ${result.length}`);
       return result;
     } catch (error) {
-      logger.error(`Error decoding message: ${error.message}`);
+      console.error(`KahootService: Error decoding message: ${error.message}`);
       return 'BACKUP_TOKEN_' + Date.now(); // Fallback token
     }
   }
