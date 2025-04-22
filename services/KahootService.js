@@ -24,14 +24,33 @@ class KahootService {
     const nowIsoStr = now.toISOString();
     const consentId = uuidv4();
     const dateStr = encodeURIComponent(now.toUTCString());
-
+    
+    // Створюємо дату у форматі, як у наданих куках
+    const formattedDate = `${now.toISOString().split('T')[0]}T${now.toTimeString().split(' ')[0]}.${now.getMilliseconds()}Z`;
+    const dateWithTimezone = `${now.toDateString()} ${now.toTimeString()}`;
+    const encodedDateWithTimezone = encodeURIComponent(dateWithTimezone);
+  
     return [
+      // Базовий ідентифікатор, який завжди є в куках Kahoot
       `generated_uuid=${uuid}`,
-      `OptanonAlertBoxClosed=${nowIsoStr}`,
-      `OptanonConsent=isGpcEnabled=0&datestamp=${dateStr}&version=202411.1.0&browserGpcFlag=0&isIABGlobal=false&hosts=&consentId=${consentId}&interactionCount=1&isAnonUser=1&landingPath=NotLandingPage&groups=C0001%3A1%2CC0002%3A0%2CC0003%3A0%2CC0004%3A0&intType=3`,
+      
+      // Кука OptanonAlertBoxClosed, яка має поточну дату
+      `OptanonAlertBoxClosed=${formattedDate}`,
+      
+      // Кука OptanonConsent, яка містить детальну інформацію про згоду користувача
+      `OptanonConsent=isGpcEnabled=0&datestamp=${encodedDateWithTimezone}&version=202411.1.0&browserGpcFlag=0&isIABGlobal=false&hosts=&consentId=${consentId}&interactionCount=1&isAnonUser=1&landingPath=NotLandingPage&groups=C0001%3A1%2CC0002%3A0%2CC0003%3A0%2CC0004%3A0&intType=3`,
+      
+      // Додаткові куки для ідентифікації пристрою
       `deviceId=${uuid.replace(/-/g, '')}`,
-      `AWSALB=${Math.random().toString(36).substring(2)}`,
-      `session-id=${Math.random().toString(36).substring(2)}`,
+      
+      // AWS ALB (Application Load Balancer) куки, які допомагають з балансуванням навантаження
+      `AWSALB=${Math.random().toString(36).substring(2, 10)}`,
+      `AWSALBCORS=${Math.random().toString(36).substring(2, 10)}`,
+      
+      // Ідентифікатор сесії
+      `session-id=${Math.random().toString(36).substring(2, 10)}`,
+      
+      // Прапорець, що показує, що це гравець
       `player=true`
     ];
   }

@@ -30,65 +30,107 @@ class KahootBot {
     console.log(`[Bot ${this.id}] [${type}] ${message}`);
   }
   
-  async connect() {
-    try {
-      console.log(`CONNECTING: Bot ${this.id} attempting to connect to PIN: ${this.pin}`);
-      
-      // Validate PIN format
-      if (!this.pin || !/^\d{6,10}$/.test(this.pin)) {
-        console.log(`INVALID PIN: ${this.pin} is not valid`);
-        return false;
-      }
-      
-      console.log("Getting session token...");
-      // Get session token
+  async connectWebSocket() {
+    return new Promise((resolve, reject) => {
       try {
-        const sessionData = await this.kahootService.getSession(this.pin);
-        console.log(`SESSION DATA: ${JSON.stringify(sessionData)}`);
+        // Формуємо URL для WebSocket з'єднання
+        const wsUrl = this.challengeToken
+          ? `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}/${this.challengeToken}`
+          : `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}`;
         
-        if (!sessionData || !sessionData.liveGameId) {
-          console.log("SESSION ERROR: No liveGameId in session data");
-          throw new Error('Failed to get game session token');
+        console.log(`WS: Connecting to ${wsUrl}`);
+        
+        // Отримуємо проксі агент (якщо налаштований)
+        const agent = proxyUtils.getProxyAgent();
+        this.log(`WS: Proxy agent: ${agent ? 'Yes' : 'No'}`);
+        
+        // Налаштовуємо заголовки, які більш точно імітують браузер
+        const headers = {
+          'User-Agent': this.kahootService.getRandomUserAgent(),
+          'Origin': 'https://kahoot.it',
+          'Referer': `https://kahoot.it/join?gameId=${this.pin}`,
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept': '*/*',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+          'Sec-WebSocket-Version': '13',
+          'Sec-WebSocket-Extensions': 'permessage-deflate; client_max_window_bits',
+          'Sec-Fetch-Dest': 'websocket',
+          'Sec-Fetch-Mode': 'websocket',
+          'Sec-Fetch-Site': 'same-origin'
+        };
+        
+        // Додаємо cookie до заголовків
+        const cookies = this.kahootService.generateKahootCookies();
+        if (cookies && cookies.length > 0) {
+          headers['Cookie'] = cookies.join('; ');
+          console.log(`WS: Added ${cookies.length} cookies`);
         }
         
-        this.sessionToken = sessionData.liveGameId;
-        console.log(`SESSION SUCCESS: Got token ${this.sessionToken.substring(0, 10)}...`);
+        // Конфігуруємо опції для WebSocket
+        const options = {
+          headers,
+          agent,
+          handshakeTimeout: 15000,   // Збільшуємо таймаут рукостискання
+          perMessageDeflate: true    // Включаємо стиснення повідомлень
+        };
         
-        // If there's a challenge, solve it
-        if (sessionData.challenge) {
-          this.log('Challenge detected, solving...', 'info');
-          console.log('CHALLENGE: Detected, attempting to solve');
+        console.log(`WS: Using WebSocket with proxy: ${Boolean(agent)}`);
+        
+        // Додаємо випадкову затримку, щоб імітувати поведінку реального клієнта
+        setTimeout(() => {
+          // Створюємо WebSocket з'єднання
+          this.socket = new WebSocket(wsUrl, options);
           
-          try {
-            this.challengeToken = await this.kahootService.solveChallenge(sessionData.challenge);
+          // Налаштовуємо обробники подій для WebSocket
+          this.socket.on('open', () => {
+            console.log('WS: Connection established successfully');
+            this.connected = true;
             
-            if (!this.challengeToken) {
-              console.log('CHALLENGE ERROR: Failed to solve challenge');
-              throw new Error('Failed to solve challenge token');
+            // Імітуємо деяку затримку перед надсиланням handshake
+            setTimeout(() => {
+              this.sendHandshake();
+              resolve(true);
+            }, Math.floor(Math.random() * 300) + 100);
+          });
+          
+          this.socket.on('message', (message) => {
+            console.log(`WS: Received message of length ${message.length}`);
+            this.handleSocketMessage(message);
+          });
+          
+          this.socket.on('error', (error) => {
+            console.error(`WS ERROR: ${error.message}`);
+            this.connected = false;
+            reject(error);
+          });
+          
+          this.socket.on('close', (code, reason) => {
+            console.log(`WS CLOSED: ${code} ${reason || 'No reason'}`);
+            this.connected = false;
+          });
+          
+          // Встановлюємо таймаут для з'єднання
+          const connectionTimeout = setTimeout(() => {
+            console.error(`WS TIMEOUT: Connection timeout`);
+            if (this.socket && this.socket.readyState !== WebSocket.OPEN) {
+              this.socket.terminate();
+              reject(new Error('Connection timeout'));
             }
-            
-            console.log(`CHALLENGE SUCCESS: Got token ${this.challengeToken.substring(0, 10)}...`);
-          } catch (challengeError) {
-            console.error(`CHALLENGE ERROR DETAILS: ${challengeError.message}`);
-            throw challengeError;
-          }
-        }
-        
-        // Connect WebSocket
-        console.log('Connecting WebSocket...');
-        await this.connectWebSocket();
-        
-        return true;
-      } catch (sessionError) {
-        console.error(`SESSION ERROR DETAILS: ${sessionError.message}`);
-        console.error(`SESSION ERROR STACK: ${sessionError.stack}`);
-        throw sessionError;
+          }, 15000);
+          
+          // Очищаємо таймаут при успішному з'єднанні
+          this.socket.once('open', () => {
+            clearTimeout(connectionTimeout);
+          });
+        }, Math.floor(Math.random() * 500) + 100);
+      } catch (error) {
+        console.error(`WS SETUP ERROR: ${error.message}`);
+        console.error(`WS SETUP STACK: ${error.stack}`);
+        reject(error);
       }
-    } catch (error) {
-      console.error(`CONNECT ERROR: ${error.message}`);
-      console.error(`CONNECT STACK: ${error.stack}`);
-      return false;
-    }
+    });
   }
   
   async connectWebSocket() {
