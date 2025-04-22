@@ -135,5 +135,8 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
+# OS generated files
+.DS_Store
+
 # VSCode settings
 .vscode/
