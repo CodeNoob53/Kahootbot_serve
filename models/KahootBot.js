@@ -2,6 +2,8 @@
 const WebSocket = require('ws');
 const proxyUtils = require('../utils/proxyUtils');
 const KahootService = require('../services/KahootService');
+const crypto = require('crypto');
+const generateCookies = require('../utils/cookiesTemplate');
 
 class KahootBot {
   constructor(config) {
@@ -36,7 +38,6 @@ class KahootBot {
         const useProxy = this.config && this.config.bypassProxy === true ? false : true;
         const agent = useProxy ? proxyUtils.getProxyAgent() : null;
   
-        // Формуємо безпечний WS URL
         let wsUrl = this.challengeToken
           ? `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}/${encodeURIComponent(this.challengeToken)}`
           : `wss://kahoot.it/cometd/${this.pin}/${this.sessionToken}`;
@@ -44,31 +45,24 @@ class KahootBot {
         const randomParam = Date.now() + Math.floor(Math.random() * 10000);
         wsUrl += `?_=${randomParam}`;
   
-        console.log(`WS: Connecting to ${wsUrl} ${useProxy ? 'with proxy' : 'directly'}`);
-        this.log(`WS: Proxy agent: ${agent ? 'Yes' : 'No'}`);
-  
-        const userAgent = this.kahootService.getRandomUserAgent();
+        const cookies = generateCookies();
         const headers = {
-          'User-Agent': userAgent,
-          'Origin': 'https://kahoot.it',
-          'Referer': `https://kahoot.it/join?gameId=${this.pin}&source=web`,
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Accept': '*/*',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-          'Sec-WebSocket-Version': '13',
-          'Sec-WebSocket-Extensions': 'permessage-deflate; client_max_window_bits',
-          'Sec-Fetch-Dest': 'websocket',
-          'Sec-Fetch-Mode': 'websocket',
-          'Sec-Fetch-Site': 'same-origin',
-          'Host': 'kahoot.it'
+          "Host": "kahoot.it",
+          "Connection": "Upgrade",
+          "Pragma": "no-cache",
+          "Cache-Control": "no-cache",
+          "Upgrade": "websocket",
+          "Origin": "https://kahoot.it",
+          "User-Agent": this.kahootService.getRandomUserAgent(),
+          "Accept-Encoding": "gzip, deflate, br",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Sec-WebSocket-Version": "13",
+          "Sec-WebSocket-Extensions": "permessage-deflate; client_max_window_bits",
+          "Sec-WebSocket-Key": crypto.randomBytes(16).toString('base64'),
+          "Cookie": cookies.join('; ')
         };
   
-        const cookies = this.kahootService.generateKahootCookies();
-        if (cookies.length > 0) {
-          headers['Cookie'] = cookies.join('; ');
-          console.log(`WS: Added ${cookies.length} cookies`);
-        }
+        console.log(`WS: Connecting to ${wsUrl}`);
   
         const options = {
           headers,
@@ -77,55 +71,46 @@ class KahootBot {
           perMessageDeflate: true
         };
   
-        setTimeout(() => {
-          try {
-            this.socket = new WebSocket(wsUrl, options);
-            this.socket.on('open', () => {
-              console.log('WS: Connection established successfully');
-              this.connected = true;
+        this.socket = new WebSocket(wsUrl, options);
   
-              setTimeout(() => {
-                this.sendHandshake();
-                resolve(true);
-              }, Math.floor(Math.random() * 300) + 100);
-            });
+        this.socket.on('open', () => {
+          console.log('WS: Connection established successfully');
+          this.connected = true;
+          setTimeout(() => {
+            this.sendHandshake();
+            resolve(true);
+          }, Math.floor(Math.random() * 300) + 100);
+        });
   
-            this.socket.on('message', (message) => {
-              console.log(`WS: Received message of length ${message.length}`);
-              this.handleSocketMessage(message);
-            });
+        this.socket.on('message', (message) => {
+          console.log(`WS: Received message of length ${message.length}`);
+          this.handleSocketMessage(message);
+        });
   
-            this.socket.on('error', (error) => {
-              console.error(`WS ERROR: ${error.message}`);
-              this.connected = false;
-              reject(error);
-            });
+        this.socket.on('error', (error) => {
+          console.error(`WS ERROR: ${error.message}`);
+          this.connected = false;
+          reject(error);
+        });
   
-            this.socket.on('close', (code, reason) => {
-              console.log(`WS CLOSED: ${code} ${reason || 'No reason'}`);
-              this.connected = false;
-            });
+        this.socket.on('close', (code, reason) => {
+          console.log(`WS CLOSED: ${code} ${reason || 'No reason'}`);
+          this.connected = false;
+        });
   
-            const connectionTimeout = setTimeout(() => {
-              console.error(`WS TIMEOUT: Connection timeout`);
-              if (this.socket && this.socket.readyState !== WebSocket.OPEN) {
-                this.socket.terminate();
-                reject(new Error('Connection timeout'));
-              }
-            }, 15000);
-  
-            this.socket.once('open', () => {
-              clearTimeout(connectionTimeout);
-            });
-  
-          } catch (wsError) {
-            console.error(`WS CREATION ERROR: ${wsError.message}`);
-            reject(wsError);
+        const connectionTimeout = setTimeout(() => {
+          if (this.socket && this.socket.readyState !== WebSocket.OPEN) {
+            this.socket.terminate();
+            reject(new Error('Connection timeout'));
           }
-        }, Math.floor(Math.random() * 500) + 100);
+        }, 15000);
+  
+        this.socket.once('open', () => {
+          clearTimeout(connectionTimeout);
+        });
+  
       } catch (error) {
         console.error(`WS SETUP ERROR: ${error.message}`);
-        console.error(`WS SETUP STACK: ${error.stack}`);
         reject(error);
       }
     });
