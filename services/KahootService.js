@@ -71,15 +71,20 @@ class KahootService {
           
           res.on('end', () => {
             console.log(`KahootService: Response data length: ${data.length}`);
-            
+          
             if (res.statusCode >= 200 && res.statusCode < 300) {
               try {
-                const result = JSON.parse(data);
+                // Витягуємо лише частину, яка є валідним JSON
+                const jsonStart = data.indexOf('{');
+                const jsonEnd = data.lastIndexOf('}') + 1;
+                const jsonOnly = data.slice(jsonStart, jsonEnd);
+          
+                const result = JSON.parse(jsonOnly);
                 console.log(`KahootService: Parsed response: ${JSON.stringify(result)}`);
                 resolve(result);
               } catch (error) {
                 console.error(`KahootService: Error parsing response: ${error.message}`);
-                console.error(`KahootService: Raw response data: ${data}`);
+                console.error(`KahootService: Raw JSON candidate: ${data}`);
                 reject(new Error('Invalid response format'));
               }
             } else {
@@ -87,7 +92,7 @@ class KahootService {
               console.error(`KahootService: Response data: ${data}`);
               reject(new Error(`HTTP error: ${res.statusCode}`));
             }
-          });
+          });          
         });
         
         req.on('error', (error) => {
