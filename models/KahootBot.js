@@ -102,7 +102,7 @@ class KahootBot {
         
         // Get agent for proxy if configured
         const agent = proxyUtils.getProxyAgent();
-        console.log(`WS: Proxy agent: ${agent ? 'Yes' : 'No'}`);
+        this.log(`WS: Proxy agent: ${agent ? 'Yes' : 'No'}`);
         
         const headers = {
           'User-Agent': this.kahootService.getRandomUserAgent(),
@@ -122,7 +122,8 @@ class KahootBot {
           agent
         };
         
-        console.log(`WS: Using options: ${JSON.stringify(options, null, 2)}`);
+        // Уникаємо JSON.stringify для циклічного об'єкта
+        console.log(`WS: Using WebSocket with proxy: ${Boolean(agent)}`);
         
         this.socket = new WebSocket(wsUrl, options);
         
