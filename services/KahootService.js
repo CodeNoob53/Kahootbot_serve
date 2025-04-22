@@ -20,8 +20,8 @@ class KahootService {
   }
   
   generateKahootCookies() {
-    return cookiesTemplate;
-  }
+    return cookiesTemplate(); // ← викликаємо функцію
+  }  
   
   async getSession(pin) {
     return new Promise((resolve, reject) => {
