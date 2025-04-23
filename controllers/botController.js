@@ -2,7 +2,7 @@
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
 const SeleniumService = require('../services/SeleniumService');
-const SeleniumBotManager = require('../models/SeleniumBotManager');
+const SeleniumBotManager = require('./SeleniumBotManager');
 
 // Об'єкт для зберігання активних сесій Selenium
 const activeSessions = new Map();
