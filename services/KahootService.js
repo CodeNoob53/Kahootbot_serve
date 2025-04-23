@@ -1,8 +1,8 @@
-// services/KahootService.js (повністю оновлена версія)
+// services/KahootService.js (виправлення для стиснених відповідей)
 const https = require('https');
 const { v4: uuidv4 } = require('uuid');
+const zlib = require('zlib');
 const proxyUtils = require('../utils/proxyUtils');
-const generateKahootCookies = require('../utils/cookiesGenerator');
 const logger = require('../utils/logger');
 
 class KahootService {
@@ -23,8 +23,70 @@ class KahootService {
   }
   
   generateKahootCookies() {
-    // Використовуємо генератор куків на основі реальних зразків
-    return generateKahootCookies();
+    // Генеруємо базові куки
+    const currentDate = new Date().toISOString();
+    const userUuid = uuidv4();
+    
+    const cookies = [
+      `generated_uuid=${userUuid}`,
+      `OptanonAlertBoxClosed=${currentDate}`,
+      `OptanonConsent=isGpcEnabled=0&datestamp=${encodeURIComponent(new Date().toUTCString())}&version=202411.1.0&browserGpcFlag=0&isIABGlobal=false&hosts=&consentId=${uuidv4()}&interactionCount=1&isAnonUser=1&landingPath=NotLandingPage&groups=C0001%3A1%2CC0002%3A0%2CC0003%3A0%2CC0004%3A0&intType=3&geolocation=US%3BNY&AwaitingReconsent=false`,
+      `player=true`,
+      `kahoot.language=en`,
+      `_ga=GA1.2.${Math.floor(Math.random() * 1000000000)}.${Math.floor(Math.random() * 1000000000)}`,
+      `_gid=GA1.2.${Math.floor(Math.random() * 1000000000)}.${Math.floor(Math.random() * 1000000000)}`,
+      `correlationId=${uuidv4()}`
+    ];
+    
+    return cookies;
+  }
+  
+  /**
+   * Розпаковує стиснені дані
+   * @param {Buffer} data Стиснені дані
+   * @param {string} encoding Тип стиснення
+   * @returns {Promise<Buffer>} Розпаковані дані
+   */
+  decompressData(data, encoding) {
+    return new Promise((resolve, reject) => {
+      if (!encoding) {
+        return resolve(data);
+      }
+      
+      try {
+        if (encoding.includes('gzip')) {
+          zlib.gunzip(data, (err, decompressed) => {
+            if (err) {
+              reject(err);
+            } else {
+              resolve(decompressed);
+            }
+          });
+        } else if (encoding.includes('deflate')) {
+          zlib.inflate(data, (err, decompressed) => {
+            if (err) {
+              reject(err);
+            } else {
+              resolve(decompressed);
+            }
+          });
+        } else if (encoding.includes('br')) {
+          zlib.brotliDecompress(data, (err, decompressed) => {
+            if (err) {
+              reject(err);
+            } else {
+              resolve(decompressed);
+            }
+          });
+        } else {
+          // Невідомий тип стиснення, повертаємо як є
+          resolve(data);
+        }
+      } catch (error) {
+        logger.error(`Decompression error: ${error.message}`);
+        resolve(data); // Повертаємо оригінальні дані у разі помилки
+      }
+    });
   }
   
   /**
@@ -92,7 +154,7 @@ class KahootService {
           
           logger.debug(`KahootService: Request options: ${JSON.stringify(options, null, 2)}`);
           
-          const req = https.request(urlWithParams, options, (res) => {
+          const req = https.request(urlWithParams, options, async (res) => {
             logger.info(`KahootService: Response status: ${res.statusCode}`);
             logger.debug(`KahootService: Response headers: ${JSON.stringify(res.headers)}`);
             
@@ -100,39 +162,55 @@ class KahootService {
             const sessionToken = res.headers['x-kahoot-session-token'] || '';
             const gameServer = res.headers['x-kahoot-gameserver'] || '';
             
-            let data = '';
+            // Отримуємо тип стиснення з заголовків
+            const contentEncoding = res.headers['content-encoding'] || '';
+            
+            let chunks = [];
             
             res.on('data', (chunk) => {
-              data += chunk;
+              chunks.push(chunk);
             });
             
-            res.on('end', () => {
-              logger.info(`KahootService: Response data length: ${data.length}`);
-              
-              if (res.statusCode >= 200 && res.statusCode < 300) {
-                try {
-                  const result = JSON.parse(data);
-                  
-                  // Додаємо заголовки до результату
-                  result.sessionToken = sessionToken;
-                  result.gameServer = gameServer;
-                  
-                  // Перевіряємо наявність liveGameId або створюємо з sessionToken
-                  if (!result.liveGameId && sessionToken) {
-                    result.liveGameId = sessionToken;
+            res.on('end', async () => {
+              try {
+                // Об'єднуємо всі фрагменти в один буфер
+                const buffer = Buffer.concat(chunks);
+                logger.info(`KahootService: Response data length: ${buffer.length}`);
+                
+                // Розпаковуємо дані, якщо вони стиснені
+                const decompressedData = await this.decompressData(buffer, contentEncoding);
+                
+                // Конвертуємо в рядок
+                const data = decompressedData.toString('utf8');
+                
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                  try {
+                    const result = JSON.parse(data);
+                    
+                    // Додаємо заголовки до результату
+                    result.sessionToken = sessionToken;
+                    result.gameServer = gameServer;
+                    
+                    // Перевіряємо наявність liveGameId або створюємо з sessionToken
+                    if (!result.liveGameId && sessionToken) {
+                      result.liveGameId = sessionToken;
+                    }
+                    
+                    logger.debug(`KahootService: Parsed response: ${JSON.stringify(result)}`);
+                    resolve(result);
+                  } catch (error) {
+                    logger.error(`KahootService: Error parsing response: ${error.message}`);
+                    logger.error(`KahootService: Raw response data: ${data}`);
+                    reject(new Error('Invalid response format'));
                   }
-                  
-                  logger.debug(`KahootService: Parsed response: ${JSON.stringify(result)}`);
-                  resolve(result);
-                } catch (error) {
-                  logger.error(`KahootService: Error parsing response: ${error.message}`);
-                  logger.error(`KahootService: Raw response data: ${data}`);
-                  reject(new Error('Invalid response format'));
+                } else {
+                  logger.error(`KahootService: HTTP error: ${res.statusCode}`);
+                  logger.error(`KahootService: Response data: ${data}`);
+                  reject(new Error(`HTTP error: ${res.statusCode}`));
                 }
-              } else {
-                logger.error(`KahootService: HTTP error: ${res.statusCode}`);
-                logger.error(`KahootService: Response data: ${data}`);
-                reject(new Error(`HTTP error: ${res.statusCode}`));
+              } catch (error) {
+                logger.error(`KahootService: Error processing response: ${error.message}`);
+                reject(error);
               }
             });
           });
