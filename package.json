@@ -1,11 +1,12 @@
 {
   "name": "kahoot-bot-proxy-server",
   "version": "1.0.0",
-  "description": "Проксі-сервер для Kahoot бота",
+  "description": "Проксі-сервер для Kahoot бота з підтримкою Selenium",
   "main": "render-server.js",
   "scripts": {
     "start": "node render-server.js",
-    "dev": "nodemon render-server.js"
+    "dev": "nodemon render-server.js",
+    "install-drivers": "selenium-standalone install"
   },
   "author": "Kahoot Bot Proxy Server",
   "dependencies": {
@@ -18,7 +19,10 @@
     "axios": "^1.6.0",
     "uuid": "^9.0.0",
     "node-fetch": "^3.3.1",
-    "@tensorflow/tfjs-node": "^4.10.0"
+    "@tensorflow/tfjs-node": "^4.10.0",
+    "selenium-webdriver": "^4.15.0",
+    "chromedriver": "^120.0.0",
+    "selenium-standalone": "^9.0.0"
   },
   "devDependencies": {
     "nodemon": "^2.0.22"

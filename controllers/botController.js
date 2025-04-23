@@ -1,157 +1,233 @@
-// controllers/botController.js
+// controllers/seleniumBotController.js
 const { v4: uuidv4 } = require('uuid');
-const BotManager = require('../models/BotManager');
+const logger = require('../utils/logger');
+const SeleniumService = require('../services/SeleniumService');
+const SeleniumBotManager = require('../models/SeleniumBotManager');
 
-// Start a new bot
-exports.startBot = async (req, res) => {
+// Об'єкт для зберігання активних сесій Selenium
+const activeSessions = new Map();
+
+// Старт нового Selenium-бота
+exports.startSeleniumBot = async (req, res) => {
   try {
-    const { name, pin, useML, useSearch } = req.body;
+    const { name, pin, useProxy } = req.body;
     
-    console.log(`Starting bot with PIN: ${pin}, Name: ${name}`);
+    logger.info(`Starting Selenium bot with PIN: ${pin}, Name: ${name}`);
     
-    // Validate input
+    // Валідація вхідних даних
     if (!name || !pin) {
       return res.status(400).json({
         success: false,
-        message: 'Name and PIN are required'
+        message: 'Необхідно вказати ім\'я та PIN-код'
       });
     }
     
-    // Basic PIN validation
+    // Валідація PIN-коду
     if (!/^\d{6,10}$/.test(pin)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid PIN format. PIN must be 6-10 digits'
+        message: 'Невірний формат PIN-коду. PIN повинен містити 6-10 цифр'
       });
     }
     
-    // Create a unique bot ID
+    // Створюємо унікальний ID для бота
     const botId = uuidv4();
     
-    // Create bot configuration (simplified, no ML/Search)
-    const config = {
-      id: botId,
-      name,
-      pin,
-      onLog: (message, type) => {
-        console.log(`[Bot ${botId}] [${type || 'INFO'}] ${message}`);
-      }
-    };
+    // Створюємо сервіс Selenium
+    const seleniumService = new SeleniumService();
     
-    console.log("Bot manager obtaining...");
-    // Start the bot
-    const botManager = BotManager.getInstance();
-    console.log("Bot manager obtained, starting bot...");
-    const startResult = await botManager.startBot(config);
+    // Ініціалізуємо Selenium
+    const initialized = await seleniumService.initialize();
+    if (!initialized) {
+      return res.status(500).json({
+        success: false,
+        message: 'Не вдалося ініціалізувати Selenium'
+      });
+    }
     
-    console.log(`Start result: ${JSON.stringify(startResult)}`);
+    // Приєднуємося до гри Kahoot
+    const joinResult = await seleniumService.joinKahootGame(pin, name);
     
-    if (startResult.success) {
-      console.log(`Bot started with ID: ${botId}`);
+    if (joinResult.success) {
+      // Зберігаємо сесію в активних сесіях
+      activeSessions.set(botId, {
+        id: botId,
+        name,
+        pin,
+        service: seleniumService,
+        session: joinResult.session,
+        startTime: Date.now(),
+        status: 'active'
+      });
+      
+      logger.info(`Selenium bot started with ID: ${botId}`);
+      
       return res.status(201).json({
         success: true,
         botId,
-        message: 'Bot started successfully'
+        message: 'Selenium-бот успішно запущено',
+        session: joinResult.session
       });
     } else {
-      console.log(`Failed to start bot: ${startResult.message}`);
+      // Закриваємо Selenium при невдалому з'єднанні
+      await seleniumService.close();
+      
       return res.status(400).json({
         success: false,
-        message: startResult.message
+        message: joinResult.message
       });
     }
   } catch (error) {
-    console.error(`DETAILED ERROR: ${error.message}`);
-    console.error(`Stack trace: ${error.stack}`);
+    logger.error(`Error starting Selenium bot: ${error.message}`);
     return res.status(500).json({
       success: false,
-      message: `Internal server error: ${error.message}`
+      message: `Внутрішня помилка сервера: ${error.message}`
     });
   }
 };
 
-// Stop a bot
-exports.stopBot = async (req, res) => {
+// Зупинка Selenium-бота
+exports.stopSeleniumBot = async (req, res) => {
   try {
     const { botId } = req.body;
     
-    console.log(`Stopping bot: ${botId}`);
+    logger.info(`Stopping Selenium bot: ${botId}`);
     
     if (!botId) {
       return res.status(400).json({
         success: false,
-        message: 'Bot ID is required'
+        message: 'Необхідно вказати ID бота'
       });
     }
     
-    const botManager = BotManager.getInstance();
-    const stopResult = await botManager.stopBot(botId);
-    
-    if (stopResult.success) {
-      console.log(`Bot stopped: ${botId}`);
-      return res.json({
-        success: true,
-        message: 'Bot stopped successfully'
-      });
-    } else {
-      console.log(`Failed to stop bot: ${stopResult.message}`);
-      return res.status(400).json({
+    // Перевіряємо, чи існує бот
+    const botSession = activeSessions.get(botId);
+    if (!botSession) {
+      return res.status(404).json({
         success: false,
-        message: stopResult.message
+        message: 'Бота не знайдено'
       });
     }
+    
+    // Закриваємо Selenium
+    await botSession.service.close();
+    
+    // Видаляємо сесію з активних
+    activeSessions.delete(botId);
+    
+    logger.info(`Selenium bot stopped: ${botId}`);
+    
+    return res.json({
+      success: true,
+      message: 'Selenium-бот успішно зупинено'
+    });
   } catch (error) {
-    console.error(`Error stopping bot: ${error.message}`);
+    logger.error(`Error stopping Selenium bot: ${error.message}`);
     return res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: 'Внутрішня помилка сервера'
     });
   }
 };
 
-// Get status of a specific bot
-exports.getBotStatus = (req, res) => {
+// Відповідь на питання
+exports.answerQuestion = async (req, res) => {
+  try {
+    const { botId, answerIndex } = req.body;
+    
+    logger.info(`Bot ${botId} answering with option ${answerIndex}`);
+    
+    if (!botId || answerIndex === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Необхідно вказати ID бота та індекс відповіді'
+      });
+    }
+    
+    // Перевіряємо, чи існує бот
+    const botSession = activeSessions.get(botId);
+    if (!botSession) {
+      return res.status(404).json({
+        success: false,
+        message: 'Бота не знайдено'
+      });
+    }
+    
+    // Відповідаємо на питання
+    const answerResult = await botSession.service.answerQuestion(answerIndex);
+    
+    return res.json({
+      success: answerResult,
+      message: answerResult ? 'Відповідь надіслано' : 'Не вдалося відповісти'
+    });
+  } catch (error) {
+    logger.error(`Error answering question: ${error.message}`);
+    return res.status(500).json({
+      success: false,
+      message: 'Внутрішня помилка сервера'
+    });
+  }
+};
+
+// Отримання статусу бота
+exports.getSeleniumBotStatus = (req, res) => {
   try {
     const { id } = req.params;
     
-    console.log(`Getting status for bot: ${id}`);
+    logger.info(`Getting status for Selenium bot: ${id}`);
     
     if (!id) {
       return res.status(400).json({
         success: false,
-        message: 'Bot ID is required'
+        message: 'Необхідно вказати ID бота'
       });
     }
     
-    const botManager = BotManager.getInstance();
-    const botStatus = botManager.getBotStatus(id);
-    
-    if (botStatus) {
-      return res.json({
-        success: true,
-        status: botStatus
-      });
-    } else {
+    // Перевіряємо, чи існує бот
+    const botSession = activeSessions.get(id);
+    if (!botSession) {
       return res.status(404).json({
         success: false,
-        message: 'Bot not found'
+        message: 'Бота не знайдено'
       });
     }
+    
+    return res.json({
+      success: true,
+      status: {
+        id: botSession.id,
+        name: botSession.name,
+        pin: botSession.pin,
+        status: botSession.status,
+        startTime: botSession.startTime,
+        uptime: Date.now() - botSession.startTime
+      }
+    });
   } catch (error) {
-    console.error(`Error getting bot status: ${error.message}`);
+    logger.error(`Error getting Selenium bot status: ${error.message}`);
     return res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: 'Внутрішня помилка сервера'
     });
   }
 };
 
-// Get all active bots
-exports.getAllBots = (req, res) => {
+// Отримання всіх активних ботів
+exports.getAllSeleniumBots = (req, res) => {
   try {
-    console.log('Getting all bots');
-    const botManager = BotManager.getInstance();
-    const bots = botManager.getAllBots();
+    logger.info('Getting all Selenium bots');
+    
+    const bots = [];
+    for (const [id, session] of activeSessions.entries()) {
+      bots.push({
+        id: session.id,
+        name: session.name,
+        pin: session.pin,
+        status: session.status,
+        startTime: session.startTime,
+        uptime: Date.now() - session.startTime
+      });
+    }
     
     return res.json({
       success: true,
@@ -159,34 +235,10 @@ exports.getAllBots = (req, res) => {
       bots
     });
   } catch (error) {
-    console.error(`Error getting all bots: ${error.message}`);
+    logger.error(`Error getting all Selenium bots: ${error.message}`);
     return res.status(500).json({
       success: false,
-      message: 'Internal server error'
-    });
-  }
-};
-
-// Add test endpoint for direct Kahoot testing
-exports.testKahoot = async (req, res) => {
-  try {
-    const { pin } = req.params;
-    console.log(`Testing direct Kahoot connection for PIN: ${pin}`);
-    
-    const KahootService = require('../services/KahootService');
-    const kahootService = new KahootService();
-    const result = await kahootService.getSession(pin);
-    
-    return res.json({
-      success: true,
-      sessionData: result
-    });
-  } catch (error) {
-    console.error(`Test Kahoot error: ${error.message}`);
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-      stack: error.stack
+      message: 'Внутрішня помилка сервера'
     });
   }
 };
