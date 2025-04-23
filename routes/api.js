@@ -1,4 +1,4 @@
-// routes/api.js (оновлення для додавання тестового ендпоінту)
+// routes/api.js
 const express = require('express');
 const router = express.Router();
 const botController = require('../controllers/botController');
@@ -17,5 +17,9 @@ router.get('/proxy-status', proxyController.getProxyStatus);
 
 // Test routes
 router.get('/test-kahoot/:pin', botController.testKahoot);
+
+// Нові маршрути для Playwright
+router.post('/init-playwright', botController.initPlaywright);
+router.post('/test-join-kahoot', botController.testJoinKahoot);
 
 module.exports = router;

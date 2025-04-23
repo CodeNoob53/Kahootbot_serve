@@ -1,21 +1,22 @@
-// services/KahootService.js (виправлення для стиснених відповідей)
+// services/KahootService.js
 const https = require('https');
 const { v4: uuidv4 } = require('uuid');
-const zlib = require('zlib');
 const proxyUtils = require('../utils/proxyUtils');
 const logger = require('../utils/logger');
+const browserService = require('./BrowserService');
 
 class KahootService {
   constructor() {
     this.userAgents = [
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15',
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1',
       'Mozilla/5.0 (iPad; CPU OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1',
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1'
+      'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15'
     ];
-    // Кеш токенів для повторних підключень
-    this.tokenCache = new Map();
+    
+    // Зберігаємо останні отримані куки
+    this.lastCookies = [];
   }
   
   getRandomUserAgent() {
@@ -23,213 +24,130 @@ class KahootService {
   }
   
   generateKahootCookies() {
-    // Генеруємо базові куки
-    const currentDate = new Date().toISOString();
-    const userUuid = uuidv4();
+    // Якщо у нас є валідні куки з браузера, використовуємо їх
+    if (this.lastCookies && this.lastCookies.length > 0) {
+      logger.info(`Using ${this.lastCookies.length} cookies from browser session`);
+      return this.lastCookies.map(cookie => `${cookie.name}=${cookie.value}`);
+    }
     
-    const cookies = [
-      `generated_uuid=${userUuid}`,
-      `OptanonAlertBoxClosed=${currentDate}`,
-      `OptanonConsent=isGpcEnabled=0&datestamp=${encodeURIComponent(new Date().toUTCString())}&version=202411.1.0&browserGpcFlag=0&isIABGlobal=false&hosts=&consentId=${uuidv4()}&interactionCount=1&isAnonUser=1&landingPath=NotLandingPage&groups=C0001%3A1%2CC0002%3A0%2CC0003%3A0%2CC0004%3A0&intType=3&geolocation=US%3BNY&AwaitingReconsent=false`,
-      `player=true`,
-      `kahoot.language=en`,
-      `_ga=GA1.2.${Math.floor(Math.random() * 1000000000)}.${Math.floor(Math.random() * 1000000000)}`,
-      `_gid=GA1.2.${Math.floor(Math.random() * 1000000000)}.${Math.floor(Math.random() * 1000000000)}`,
-      `correlationId=${uuidv4()}`
-    ];
-    
-    return cookies;
+    // Повертаємо старі шаблонні куки як запасний варіант
+    logger.warn('No browser cookies available, using template cookies');
+    return require('../utils/cookiesTemplate');
   }
   
-  /**
-   * Розпаковує стиснені дані
-   * @param {Buffer} data Стиснені дані
-   * @param {string} encoding Тип стиснення
-   * @returns {Promise<Buffer>} Розпаковані дані
-   */
-  decompressData(data, encoding) {
-    return new Promise((resolve, reject) => {
-      if (!encoding) {
-        return resolve(data);
+  async getSession(pin) {
+    try {
+      logger.info(`KahootService: Getting session for PIN: ${pin} using Playwright`);
+      
+      if (!pin || !/^\d{6,10}$/.test(pin)) {
+        logger.error(`KahootService: Invalid game PIN: ${pin}`);
+        throw new Error('Invalid game PIN');
       }
       
+      // Спочатку спробуємо отримати сесію через Playwright
       try {
-        if (encoding.includes('gzip')) {
-          zlib.gunzip(data, (err, decompressed) => {
-            if (err) {
-              reject(err);
-            } else {
-              resolve(decompressed);
-            }
-          });
-        } else if (encoding.includes('deflate')) {
-          zlib.inflate(data, (err, decompressed) => {
-            if (err) {
-              reject(err);
-            } else {
-              resolve(decompressed);
-            }
-          });
-        } else if (encoding.includes('br')) {
-          zlib.brotliDecompress(data, (err, decompressed) => {
-            if (err) {
-              reject(err);
-            } else {
-              resolve(decompressed);
-            }
-          });
-        } else {
-          // Невідомий тип стиснення, повертаємо як є
-          resolve(data);
+        const sessionData = await browserService.getKahootSession(pin);
+        logger.info(`KahootService: Successfully got session data via Playwright`);
+        
+        // Зберігаємо отримані куки для подальшого використання
+        if (sessionData.cookies && sessionData.cookies.length > 0) {
+          this.lastCookies = sessionData.cookies;
+          logger.info(`KahootService: Saved ${this.lastCookies.length} cookies from Playwright session`);
         }
-      } catch (error) {
-        logger.error(`Decompression error: ${error.message}`);
-        resolve(data); // Повертаємо оригінальні дані у разі помилки
+        
+        // Повертаємо отримані дані
+        return {
+          liveGameId: sessionData.sessionToken || sessionData.liveGameId,
+          challenge: sessionData.challenge,
+          clientId: sessionData.clientId
+        };
+      } catch (browserError) {
+        logger.error(`KahootService: Playwright error: ${browserError.message}`);
+        logger.info(`KahootService: Falling back to direct HTTP method`);
+        
+        // Запасний варіант - пробуємо через HTTP запит
+        return this.getSessionHttpFallback(pin);
       }
-    });
+    } catch (error) {
+      logger.error(`KahootService: Error getting session: ${error.message}`);
+      throw error;
+    }
   }
   
-  /**
-   * Отримання сесії Kahoot за PIN-кодом
-   * @param {string} pin - PIN гри
-   * @returns {Promise<object>} Об'єкт з даними сесії
-   */
-  async getSession(pin) {
+  async getSessionHttpFallback(pin) {
     return new Promise((resolve, reject) => {
       try {
-        logger.info(`KahootService: Getting session for PIN: ${pin}`);
+        logger.info(`KahootService: Getting session for PIN: ${pin} via HTTP fallback`);
         
-        if (!pin || !/^\d{6,10}$/.test(pin)) {
-          logger.error(`KahootService: Invalid game PIN: ${pin}`);
-          reject(new Error('Invalid game PIN'));
-          return;
-        }
+        const url = `https://kahoot.it/reserve/session/${pin}/`;
+        logger.info(`KahootService: Request URL: ${url}`);
         
-        // Додаємо випадкову затримку перед запитом (як реальний користувач)
-        const delay = Math.floor(Math.random() * 500) + 500;
-        logger.info(`KahootService: Adding random delay of ${delay}ms before request`);
+        const agent = proxyUtils.getProxyAgent();
+        logger.info(`KahootService: Proxy agent created: ${agent ? 'Yes' : 'No'}`);
         
-        setTimeout(() => {
-          // Базовий URL
-          const url = `https://kahoot.it/reserve/session/${pin}/`;
-          logger.info(`KahootService: Request URL: ${url}`);
-          
-          // Генеруємо випадковий cid (client id) і sid (session id)
-          const cid = Math.floor(Math.random() * 1000000);
-          const sid = uuidv4().substring(0, 8);
-          const urlWithParams = `${url}?cid=${cid}&sid=${sid}`;
-          
-          const agent = proxyUtils.getProxyAgent();
-          logger.info(`KahootService: Proxy agent created: ${agent ? 'Yes' : 'No'}`);
-          
-          // Генеруємо cookies
-          const cookies = this.generateKahootCookies();
-          logger.info(`KahootService: Generated ${cookies.length} cookies`);
-          
-          // Розширені заголовки з логу реального браузера
-          const headers = {
+        // Generate cookies
+        const cookies = this.generateKahootCookies();
+        logger.info(`KahootService: Generated ${cookies.length} cookies`);
+        
+        const options = {
+          method: 'GET',
+          headers: {
             'User-Agent': this.getRandomUserAgent(),
             'Origin': 'https://kahoot.it',
-            'Referer': `https://kahoot.it/join?gameId=${pin}&source=web`,
+            'Referer': 'https://kahoot.it/',
             'Accept-Language': 'en-US,en;q=0.9',
-            'Accept': 'application/json, text/plain, */*',
             'Cache-Control': 'no-cache',
-            'Cookie': cookies.join('; '),
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
-            'Connection': 'keep-alive',
-            'Pragma': 'no-cache',
-            'sec-ch-ua': '"Google Chrome";v="135", "Not=A?Brand";v="99"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"'
-          };
-          
-          const options = {
-            method: 'GET',
-            headers: headers,
-            agent: agent
-          };
-          
-          logger.debug(`KahootService: Request options: ${JSON.stringify(options, null, 2)}`);
-          
-          const req = https.request(urlWithParams, options, async (res) => {
-            logger.info(`KahootService: Response status: ${res.statusCode}`);
-            logger.debug(`KahootService: Response headers: ${JSON.stringify(res.headers)}`);
-            
-            // Зберігаємо важливі заголовки
-            const sessionToken = res.headers['x-kahoot-session-token'] || '';
-            const gameServer = res.headers['x-kahoot-gameserver'] || '';
-            
-            // Отримуємо тип стиснення з заголовків
-            const contentEncoding = res.headers['content-encoding'] || '';
-            
-            let chunks = [];
-            
-            res.on('data', (chunk) => {
-              chunks.push(chunk);
-            });
-            
-            res.on('end', async () => {
-              try {
-                // Об'єднуємо всі фрагменти в один буфер
-                const buffer = Buffer.concat(chunks);
-                logger.info(`KahootService: Response data length: ${buffer.length}`);
-                
-                // Розпаковуємо дані, якщо вони стиснені
-                const decompressedData = await this.decompressData(buffer, contentEncoding);
-                
-                // Конвертуємо в рядок
-                const data = decompressedData.toString('utf8');
-                
-                if (res.statusCode >= 200 && res.statusCode < 300) {
-                  try {
-                    const result = JSON.parse(data);
-                    
-                    // Додаємо заголовки до результату
-                    result.sessionToken = sessionToken;
-                    result.gameServer = gameServer;
-                    
-                    // Перевіряємо наявність liveGameId або створюємо з sessionToken
-                    if (!result.liveGameId && sessionToken) {
-                      result.liveGameId = sessionToken;
-                    }
-                    
-                    logger.debug(`KahootService: Parsed response: ${JSON.stringify(result)}`);
-                    resolve(result);
-                  } catch (error) {
-                    logger.error(`KahootService: Error parsing response: ${error.message}`);
-                    logger.error(`KahootService: Raw response data: ${data}`);
-                    reject(new Error('Invalid response format'));
-                  }
-                } else {
-                  logger.error(`KahootService: HTTP error: ${res.statusCode}`);
-                  logger.error(`KahootService: Response data: ${data}`);
-                  reject(new Error(`HTTP error: ${res.statusCode}`));
-                }
-              } catch (error) {
-                logger.error(`KahootService: Error processing response: ${error.message}`);
-                reject(error);
-              }
-            });
-          });
-          
-          req.on('error', (error) => {
-            logger.error(`KahootService: Request error: ${error.message}`);
-            reject(error);
-          });
-          
-          // Додаємо таймаут для запиту
-          req.setTimeout(15000, () => {
-            logger.error(`KahootService: Request timeout`);
-            req.destroy(new Error('Request timeout'));
-          });
-          
-          req.end();
-          logger.info(`KahootService: Request sent`);
-        }, delay);
+            'Cookie': cookies.join('; ')
+          },
+          agent: agent
+        };
         
+        logger.debug(`KahootService: Request options: ${JSON.stringify(options, null, 2)}`);
+        
+        const req = https.request(url, options, (res) => {
+          logger.info(`KahootService: Response status: ${res.statusCode}`);
+          logger.debug(`KahootService: Response headers: ${JSON.stringify(res.headers)}`);
+          
+          let data = '';
+          
+          res.on('data', (chunk) => {
+            data += chunk;
+          });
+          
+          res.on('end', () => {
+            logger.info(`KahootService: Response data length: ${data.length}`);
+            
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              try {
+                const result = JSON.parse(data);
+                logger.info(`KahootService: Parsed response: ${JSON.stringify(result)}`);
+                resolve(result);
+              } catch (error) {
+                logger.error(`KahootService: Error parsing response: ${error.message}`);
+                logger.error(`KahootService: Raw response data: ${data}`);
+                reject(new Error('Invalid response format'));
+              }
+            } else {
+              logger.error(`KahootService: HTTP error: ${res.statusCode}`);
+              logger.error(`KahootService: Response data: ${data}`);
+              reject(new Error(`HTTP error: ${res.statusCode}`));
+            }
+          });
+        });
+        
+        req.on('error', (error) => {
+          logger.error(`KahootService: Request error: ${error.message}`);
+          reject(error);
+        });
+        
+        // Додайте таймаут для запиту
+        req.setTimeout(15000, () => {
+          logger.error(`KahootService: Request timeout`);
+          req.destroy(new Error('Request timeout'));
+        });
+        
+        req.end();
+        logger.info(`KahootService: Request sent`);
       } catch (error) {
         logger.error(`KahootService: General error: ${error.message}`);
         logger.error(`KahootService: Stack: ${error.stack}`);
@@ -237,71 +155,27 @@ class KahootService {
       }
     });
   }
-  
-  /**
-   * Отримання WebSocket URL на основі даних сесії
-   * @param {object} sessionData - Дані сесії з методу getSession
-   * @param {string} pin - PIN гри
-   * @returns {string} WebSocket URL
-   */
-  generateWebSocketUrl(sessionData, pin) {
-    logger.info(`KahootService: Generating WebSocket URL for PIN: ${pin}`);
-    
-    try {
-      // У відповіді може бути готовий token або ми його формуємо
-      let wsUrl;
-      
-      // Спочатку перевіряємо, чи є токен у x-kahoot-session-token
-      if (sessionData.sessionToken) {
-        wsUrl = `wss://kahoot.it/cometd/${pin}/${sessionData.sessionToken}`;
-        logger.info(`KahootService: Using token from headers: ${sessionData.sessionToken.substring(0, 10)}...`);
-      } 
-      // Потім перевіряємо liveGameId з відповіді
-      else if (sessionData.liveGameId) {
-        wsUrl = `wss://kahoot.it/cometd/${pin}/${sessionData.liveGameId}`;
-        logger.info(`KahootService: Using liveGameId: ${sessionData.liveGameId.substring(0, 10)}...`);
-      } 
-      // Якщо нема challenge, використовуємо простий формат
-      else if (!sessionData.challenge) {
-        throw new Error('No session token or liveGameId found in session data');
-      }
-      // Якщо є challenge, ми вже розшифрували його в getSession
-      else if (sessionData.challengeToken) {
-        wsUrl = `wss://kahoot.it/cometd/${pin}/${sessionData.liveGameId}/${encodeURIComponent(sessionData.challengeToken)}`;
-        logger.info(`KahootService: Using challenge token: ${sessionData.challengeToken.substring(0, 10)}...`);
-      }
-      // Інакше, спробуємо розшифрувати challenge
-      else if (sessionData.challenge) {
-        logger.warn(`KahootService: Challenge not decoded yet, attempting to solve`);
-        throw new Error('Challenge not decoded yet, use solveChallenge first');
-      }
-      
-      // Додаємо параметр запобігання кешуванню
-      const timestamp = Date.now();
-      wsUrl += `?_=${timestamp}`;
-      
-      logger.info(`KahootService: Generated WebSocket URL: ${wsUrl}`);
-      return wsUrl;
-    } catch (error) {
-      logger.error(`KahootService: Error generating WS URL: ${error.message}`);
-      throw error;
-    }
-  }
-  
+
   async solveChallenge(challenge) {
+    // Якщо ми використовуємо Playwright, challenge вже має бути вирішеним
+    if (!challenge || challenge.includes('no-challenge')) {
+      logger.info('KahootService: No challenge to solve or already solved by Playwright');
+      return null;
+    }
+    
     return new Promise((resolve, reject) => {
       try {
         logger.info('KahootService: Solving challenge token');
         
         if (!challenge) {
-          logger.error('KahootService: No challenge provided');
-          reject(new Error('No challenge token provided'));
+          logger.warn('KahootService: No challenge provided');
+          resolve(null);
           return;
         }
         
         logger.info(`KahootService: Challenge length: ${challenge.length}`);
         
-        // Витягуємо закодоване повідомлення
+        // Extract the encoded message
         let encodedMessage;
         try {
           const msgMatch = challenge.match(/decode\.call\(this,\s*'([^']+)'/);
@@ -330,102 +204,40 @@ class KahootService {
           return;
         }
         
-        // Витягуємо формулу зміщення
+        // Extract offset formula
         let offset;
         try {
           const offsetMatch = challenge.match(/var\s+offset\s*=\s*([^;]+);/);
-          if (!offsetMatch) {
-            logger.warn('KahootService: Could not find offset formula, using default');
-            offset = 18150; // Значення за замовчуванням, якщо не знайдено
-          } else {
-            const formula = offsetMatch[1];
-            logger.info(`KahootService: Offset formula: ${formula}`);
-            
-            // Очищуємо формулу
-            const cleanFormula = formula
-              .replace(/\s+/g, '')
-              .replace(/this\.angular\.isArray|this\.angular\.isObject/g, 'false')
-              .replace(/console\.log\([^)]+\)/g, '')
-              .replace(/window\.|document\.|localStorage|sessionStorage/g, '')
-              .replace(/eval|Function/g, '')
-              .replace(/\t/g, ''); // Важливо - видалення табуляції
-            
-            logger.info(`KahootService: Cleaned formula: ${cleanFormula}`);
-            
-            // Захищене обчислення
-            try {
-              offset = eval(cleanFormula);
-              logger.info(`KahootService: Calculated offset: ${offset}`);
-            } catch (evalError) {
-              logger.error(`KahootService: Error evaluating formula: ${evalError.message}`);
-              // Спробуємо буквальну інтерпретацію формули
-              // Приклад: ((14 + 37) + (84 * 44)) + 12
-              try {
-                const parts = cleanFormula.match(/\(\((\d+)\+(\d+)\)\+\((\d+)\*(\d+)\)\)\+(\d+)/);
-                if (parts && parts.length === 6) {
-                  const [_, a, b, c, d, e] = parts.map(Number);
-                  offset = ((a + b) + (c * d)) + e;
-                  logger.info(`KahootService: Manual calculation of offset: ${offset}`);
-                } else {
-                  throw new Error('Could not parse formula');
-                }
-              } catch (manualError) {
-                logger.error(`KahootService: Manual calculation failed: ${manualError.message}`);
-                offset = 3759; // Використовуємо значення з логів
-                logger.info(`KahootService: Using hardcoded offset: ${offset}`);
-              }
-            }
-          }
+          const formula = offsetMatch ? offsetMatch[1] : '18150'; // Default if not found
+          
+          logger.info(`KahootService: Offset formula: ${formula}`);
+          
+          // Clean formula
+          const cleanFormula = formula
+            .replace(/\s+/g, '')
+            .replace(/this\.angular\.isArray|this\.angular\.isObject/g, 'false')
+            .replace(/console\.log\([^)]+\)/g, '')
+            .replace(/window\.|document\.|localStorage|sessionStorage/g, '')
+            .replace(/eval|Function/g, '');
+          
+          logger.info(`KahootService: Cleaned formula: ${cleanFormula}`);
+          
+          offset = eval(cleanFormula); // Safe in controlled server environment
+          logger.info(`KahootService: Calculated offset: ${offset}`);
         } catch (error) {
           logger.error(`KahootService: Error calculating offset: ${error.message}`);
-          // Спробуємо кілька можливих значень зміщення
-          const possibleOffsets = [3759, 18150, 16050, 17150, 19200, 20250];
-          
-          // Тестуємо всі можливі зміщення і вибираємо найкраще
-          let bestOffset = null;
-          let bestToken = null;
-          let maxValidChars = 0;
-          
-          for (const testOffset of possibleOffsets) {
-            const token = this.decodeMessage(encodedMessage, testOffset);
-            // Рахуємо дійсні символи (a-zA-Z0-9)
-            const validChars = (token.match(/[a-zA-Z0-9]/g) || []).length;
-            
-            if (validChars > maxValidChars) {
-              maxValidChars = validChars;
-              bestOffset = testOffset;
-              bestToken = token;
-            }
-          }
-          
-          if (bestOffset) {
-            offset = bestOffset;
-            logger.info(`KahootService: Selected best offset ${offset} with ${maxValidChars} valid characters`);
-            
-            if (bestToken) {
-              // Відразу повертаємо розшифроване повідомлення
-              logger.info('KahootService: Using pre-decoded token from best offset');
-              resolve(bestToken);
-              return;
-            }
-          } else {
-            offset = 3759; // Fallback value from logs
-            logger.info(`KahootService: Using fallback offset: ${offset}`);
-          }
+          offset = 18150; // Fallback value
+          logger.info(`KahootService: Using fallback offset: ${offset}`);
         }
         
-        // Розшифруємо повідомлення
+        // Decode message
         const decodedToken = this.decodeMessage(encodedMessage, offset);
         logger.info(`KahootService: Decoded token length: ${decodedToken.length}`);
         
-        // Додатковий валідаційний крок
-        const validChars = (decodedToken.match(/[a-zA-Z0-9]/g) || []).length;
-        logger.info(`KahootService: Token contains ${validChars} valid characters out of ${decodedToken.length}`);
-        
-        if (validChars < decodedToken.length * 0.7) {
-          logger.warn('KahootService: Token appears invalid, trying alternatives');
+        if (!decodedToken || decodedToken.length < 10) {
+          logger.warn('KahootService: Decoded token appears invalid, trying alternatives');
           
-          // Перебираємо альтернативні зміщення
+          // Try alternative offsets
           const alternativeOffsets = [18150, 16050, 17150, 19200, 20250];
           for (const altOffset of alternativeOffsets) {
             if (altOffset === offset) continue;
@@ -433,12 +245,8 @@ class KahootService {
             logger.info(`KahootService: Trying alternative offset: ${altOffset}`);
             const altToken = this.decodeMessage(encodedMessage, altOffset);
             
-            // Рахуємо дійсні символи
-            const altValidChars = (altToken.match(/[a-zA-Z0-9]/g) || []).length;
-            logger.info(`KahootService: Alternative token has ${altValidChars} valid characters`);
-            
-            if (altValidChars > validChars) {
-              logger.info(`KahootService: Using better token with offset ${altOffset}`);
+            if (altToken && altToken.length > 10 && /[A-Za-z0-9]/.test(altToken)) {
+              logger.info(`KahootService: Using alternative token with offset ${altOffset}, length ${altToken.length}`);
               resolve(altToken);
               return;
             }
@@ -462,12 +270,12 @@ class KahootService {
         const char = message.charAt(position);
         const charCode = char.charCodeAt(0);
         
-        // Математична формула з Kahoot challenge
+        // Mathematical formula from Kahoot challenge
         let newCharCode = Math.floor(((charCode * (position + 1) + offset) % 77) + 48);
         
-        // Перевірка на допустимі ASCII
+        // Check for valid ASCII
         if (isNaN(newCharCode) || !isFinite(newCharCode) || newCharCode < 32 || newCharCode > 126) {
-          newCharCode = 88; // ASCII для 'X'
+          newCharCode = 88; // ASCII for 'X'
         }
         
         result += String.fromCharCode(newCharCode);
@@ -477,99 +285,19 @@ class KahootService {
       return result;
     } catch (error) {
       logger.error(`KahootService: Error decoding message: ${error.message}`);
-      return 'BACKUP_TOKEN_' + Date.now(); // Fallback токен
+      return 'BACKUP_TOKEN_' + Date.now(); // Fallback token
     }
   }
-  
-  /**
-   * Генерує формат handshake повідомлення на основі реального логу
-   * @returns {object} handshake об'єкт
-   */
-  generateHandshakeMessage() {
-    const timestamp = Date.now();
-    return {
-      id: "1",
-      version: "1.0",
-      minimumVersion: "1.0",
-      channel: "/meta/handshake",
-      supportedConnectionTypes: ["websocket", "long-polling", "callback-polling"],
-      advice: {
-        timeout: 60000,
-        interval: 0
-      },
-      ext: {
-        ack: true,
-        timesync: {
-          tc: timestamp,
-          l: 0,
-          o: 0
-        }
-      }
-    };
-  }
-  
-  /**
-   * Генерує повідомлення login для автентифікації користувача
-   * @param {string} clientId - clientId отриманий від сервера
-   * @param {string} pin - PIN гри
-   * @param {string} name - Ім'я гравця
-   * @param {string} msgId - ID повідомлення (зазвичай збільшується на 1 з кожним повідомленням)
-   * @returns {object} login повідомлення
-   */
-  generateLoginMessage(clientId, pin, name, msgId) {
-    return {
-      id: msgId,
-      channel: "/service/controller",
-      data: {
-        type: "login",
-        gameid: pin,
-        host: "kahoot.it",
-        name: name,
-        content: "{}"
-      },
-      clientId: clientId,
-      ext: {}
-    };
-  }
-  
-  /**
-   * Генерує повідомлення connect для підтримки з'єднання
-   * @param {string} clientId - clientId отриманий від сервера
-   * @param {string} msgId - ID повідомлення
-   * @param {number} ack - номер підтвердження (зазвичай починається з 0)
-   * @returns {object} connect повідомлення
-   */
-  generateConnectMessage(clientId, msgId, ack) {
-    const timestamp = Date.now();
-    const message = {
-      id: msgId,
-      channel: "/meta/connect",
-      connectionType: "websocket",
-      clientId: clientId
-    };
-    
-    if (ack === 0) {
-      message.advice = { timeout: 0 };
-      message.ext = {
-        ack: ack,
-        timesync: {
-          tc: timestamp,
-          l: 440,  // значення з логу
-          o: 1807  // значення з логу
-        }
-      };
-    } else {
-      message.ext = {
-        ack: ack,
-        timesync: {
-          tc: timestamp,
-          l: 440,
-          o: 1807
-        }
-      };
+
+  // Новий метод для з'єднання з грою напряму через Playwright
+  async connectViaPlaywright(pin, name) {
+    try {
+      logger.info(`KahootService: Connecting to game ${pin} with name ${name} via Playwright`);
+      return await browserService.joinKahootGame(pin, name);
+    } catch (error) {
+      logger.error(`KahootService: Error connecting via Playwright: ${error.message}`);
+      throw error;
     }
-    
-    return message;
   }
 }
 

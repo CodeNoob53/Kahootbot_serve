@@ -1,13 +1,14 @@
 // controllers/botController.js
 const { v4: uuidv4 } = require('uuid');
 const BotManager = require('../models/BotManager');
+const logger = require('../utils/logger');
 
 // Start a new bot
 exports.startBot = async (req, res) => {
   try {
-    const { name, pin, useML, useSearch } = req.body;
+    const { name, pin, usePlaywright = true, useML, useSearch } = req.body;
     
-    console.log(`Starting bot with PIN: ${pin}, Name: ${name}`);
+    logger.info(`Starting bot with PIN: ${pin}, Name: ${name}, usePlaywright: ${usePlaywright}`);
     
     // Validate input
     if (!name || !pin) {
@@ -28,41 +29,43 @@ exports.startBot = async (req, res) => {
     // Create a unique bot ID
     const botId = uuidv4();
     
-    // Create bot configuration (simplified, no ML/Search)
+    // Create bot configuration
     const config = {
       id: botId,
       name,
       pin,
+      usePlaywright, // Додаємо параметр для вибору методу з'єднання
       onLog: (message, type) => {
-        console.log(`[Bot ${botId}] [${type || 'INFO'}] ${message}`);
+        logger.info(`[Bot ${botId}] [${type || 'INFO'}] ${message}`);
       }
     };
     
-    console.log("Bot manager obtaining...");
+    logger.info("Bot manager obtaining...");
     // Start the bot
     const botManager = BotManager.getInstance();
-    console.log("Bot manager obtained, starting bot...");
+    logger.info("Bot manager obtained, starting bot...");
     const startResult = await botManager.startBot(config);
     
-    console.log(`Start result: ${JSON.stringify(startResult)}`);
+    logger.info(`Start result: ${JSON.stringify(startResult)}`);
     
     if (startResult.success) {
-      console.log(`Bot started with ID: ${botId}`);
+      logger.info(`Bot started with ID: ${botId}`);
       return res.status(201).json({
         success: true,
         botId,
-        message: 'Bot started successfully'
+        message: 'Bot started successfully',
+        method: usePlaywright ? 'playwright' : 'websocket'
       });
     } else {
-      console.log(`Failed to start bot: ${startResult.message}`);
+      logger.error(`Failed to start bot: ${startResult.message}`);
       return res.status(400).json({
         success: false,
         message: startResult.message
       });
     }
   } catch (error) {
-    console.error(`DETAILED ERROR: ${error.message}`);
-    console.error(`Stack trace: ${error.stack}`);
+    logger.error(`DETAILED ERROR: ${error.message}`);
+    logger.error(`Stack trace: ${error.stack}`);
     return res.status(500).json({
       success: false,
       message: `Internal server error: ${error.message}`
@@ -75,7 +78,7 @@ exports.stopBot = async (req, res) => {
   try {
     const { botId } = req.body;
     
-    console.log(`Stopping bot: ${botId}`);
+    logger.info(`Stopping bot: ${botId}`);
     
     if (!botId) {
       return res.status(400).json({
@@ -88,20 +91,20 @@ exports.stopBot = async (req, res) => {
     const stopResult = await botManager.stopBot(botId);
     
     if (stopResult.success) {
-      console.log(`Bot stopped: ${botId}`);
+      logger.info(`Bot stopped: ${botId}`);
       return res.json({
         success: true,
         message: 'Bot stopped successfully'
       });
     } else {
-      console.log(`Failed to stop bot: ${stopResult.message}`);
+      logger.error(`Failed to stop bot: ${stopResult.message}`);
       return res.status(400).json({
         success: false,
         message: stopResult.message
       });
     }
   } catch (error) {
-    console.error(`Error stopping bot: ${error.message}`);
+    logger.error(`Error stopping bot: ${error.message}`);
     return res.status(500).json({
       success: false,
       message: 'Internal server error'
@@ -114,7 +117,7 @@ exports.getBotStatus = (req, res) => {
   try {
     const { id } = req.params;
     
-    console.log(`Getting status for bot: ${id}`);
+    logger.info(`Getting status for bot: ${id}`);
     
     if (!id) {
       return res.status(400).json({
@@ -138,7 +141,7 @@ exports.getBotStatus = (req, res) => {
       });
     }
   } catch (error) {
-    console.error(`Error getting bot status: ${error.message}`);
+    logger.error(`Error getting bot status: ${error.message}`);
     return res.status(500).json({
       success: false,
       message: 'Internal server error'
@@ -149,7 +152,7 @@ exports.getBotStatus = (req, res) => {
 // Get all active bots
 exports.getAllBots = (req, res) => {
   try {
-    console.log('Getting all bots');
+    logger.info('Getting all bots');
     const botManager = BotManager.getInstance();
     const bots = botManager.getAllBots();
     
@@ -159,7 +162,7 @@ exports.getAllBots = (req, res) => {
       bots
     });
   } catch (error) {
-    console.error(`Error getting all bots: ${error.message}`);
+    logger.error(`Error getting all bots: ${error.message}`);
     return res.status(500).json({
       success: false,
       message: 'Internal server error'
@@ -171,22 +174,93 @@ exports.getAllBots = (req, res) => {
 exports.testKahoot = async (req, res) => {
   try {
     const { pin } = req.params;
-    console.log(`Testing direct Kahoot connection for PIN: ${pin}`);
+    const usePlaywright = req.query.method === 'playwright';
+    
+    logger.info(`Testing direct Kahoot connection for PIN: ${pin}, method: ${usePlaywright ? 'Playwright' : 'HTTP'}`);
     
     const KahootService = require('../services/KahootService');
     const kahootService = new KahootService();
-    const result = await kahootService.getSession(pin);
     
-    return res.json({
-      success: true,
-      sessionData: result
-    });
+    // Якщо вказано метод Playwright, використовуємо BrowserService
+    if (usePlaywright) {
+      const BrowserService = require('../services/BrowserService');
+      const sessionData = await BrowserService.getKahootSession(pin);
+      
+      return res.json({
+        success: true,
+        method: 'playwright',
+        sessionData
+      });
+    } else {
+      // Інакше використовуємо стандартний метод
+      const result = await kahootService.getSession(pin);
+      
+      return res.json({
+        success: true,
+        method: 'http',
+        sessionData: result
+      });
+    }
   } catch (error) {
-    console.error(`Test Kahoot error: ${error.message}`);
+    logger.error(`Test Kahoot error: ${error.message}`);
     return res.status(500).json({
       success: false,
       message: error.message,
       stack: error.stack
+    });
+  }
+};
+
+// Додаємо новий ендпоінт для прямого тестування входу в гру
+exports.testJoinKahoot = async (req, res) => {
+  try {
+    const { pin, name } = req.body;
+    
+    if (!pin || !name) {
+      return res.status(400).json({
+        success: false,
+        message: 'PIN та ім\'я обов\'язкові'
+      });
+    }
+    
+    logger.info(`Testing joining Kahoot game PIN: ${pin} with name: ${name}`);
+    
+    const BrowserService = require('../services/BrowserService');
+    const result = await BrowserService.joinKahootGame(pin, name);
+    
+    // Ми отримали результат, але не повертаємо сторінку, щоб уникнути проблем з серіалізацією
+    return res.json({
+      success: true,
+      message: 'Successfully joined Kahoot game',
+      clientId: result.clientId,
+      cookiesCount: result.cookies ? result.cookies.length : 0
+    });
+  } catch (error) {
+    logger.error(`Test join Kahoot error: ${error.message}`);
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// Додаємо ендпоінт для ініціалізації Playwright
+exports.initPlaywright = async (req, res) => {
+  try {
+    logger.info('Initializing Playwright');
+    
+    const BrowserService = require('../services/BrowserService');
+    const result = await BrowserService.initialize();
+    
+    return res.json({
+      success: result,
+      message: result ? 'Playwright initialized successfully' : 'Failed to initialize Playwright'
+    });
+  } catch (error) {
+    logger.error(`Playwright initialization error: ${error.message}`);
+    return res.status(500).json({
+      success: false,
+      message: error.message
     });
   }
 };
