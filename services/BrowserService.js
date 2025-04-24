@@ -151,74 +151,63 @@ class BrowserService {
     try {
       logger.info(`Joining Kahoot game with PIN: ${pin}, name: ${name}`);
       
-      // Ініціалізуємо браузер, якщо потрібно
       if (!this.browser) {
         const initialized = await this.initialize();
         if (!initialized) {
           throw new Error('Failed to initialize browser');
         }
       }
-
-      // Створюємо нову сторінку
+  
       const page = await this.context.newPage();
-      
+  
       try {
-        // Відкриваємо сторінку Kahoot
         logger.info('Opening Kahoot.it');
         await page.goto('https://kahoot.it/', { waitUntil: 'networkidle', timeout: 30000 });
-        
-        // Вводимо PIN
+  
         logger.info(`Entering PIN: ${pin}`);
         await page.waitForSelector('#game-input', { timeout: 10000 });
         await page.fill('#game-input', pin);
-        
-        // Натискаємо кнопку "Enter"
         await page.click('button[type="submit"]');
-        
-        // Чекаємо на сторінку введення імені
+  
         logger.info('Waiting for name input screen');
         await page.waitForSelector('#nickname', { timeout: 15000 });
-        
-        // Вводимо ім'я
+  
         logger.info(`Entering name: ${name}`);
         await page.fill('#nickname', name);
-        
-        // Натискаємо кнопку "OK, go!"
         await page.click('button[type="submit"]');
-        
-        // Чекаємо на підтвердження входу в гру
-        logger.info('Waiting for game confirmation');
-        await page.waitForSelector('.lobby', { timeout: 15000 });
-        
-        // Відстежуємо WebSocket з'єднання
+  
+        logger.info('Waiting for game confirmation (instructions-page)');
+        await page.waitForSelector('[data-functional-selector="instructions-page"]', { timeout: 15000 });
+  
+        // Listen for WebSocket
+        let wsMessage = null;
         const wsMessagePromise = new Promise((resolve) => {
           page.on('websocket', ws => {
             logger.info(`WebSocket connected: ${ws.url()}`);
-            
             ws.on('message', data => {
-              const messageStr = data.toString();
-              logger.debug(`WebSocket message: ${messageStr.substring(0, 100)}...`);
-              
-              // Шукаємо повідомлення підтвердження входу
-              if (messageStr.includes('"type":"login"') || 
-                  messageStr.includes('"channel":"/service/controller"')) {
-                resolve(messageStr);
+              const msgStr = data.toString();
+              logger.debug(`WebSocket message: ${msgStr.substring(0, 100)}...`);
+              if (msgStr.includes('"type":"login"') || msgStr.includes('"channel":"/service/controller"')) {
+                resolve(msgStr);
               }
             });
           });
         });
-        
-        // Чекаємо на повідомлення WebSocket або таймаут
-        const message = await Promise.race([
-          wsMessagePromise,
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout waiting for WebSocket message')), 20000)
-          )
-        ]);
-        
-        logger.info('Successfully joined the game');
-        
-        // Отримуємо cookies і localStorage після успішного входу
+  
+        try {
+          wsMessage = await Promise.race([
+            wsMessagePromise,
+            new Promise(resolve => setTimeout(() => resolve(null), 20000))
+          ]);
+          if (!wsMessage) {
+            logger.warn('WebSocket confirmation not received within timeout. Proceeding based on DOM state.');
+          }
+        } catch (err) {
+          logger.warn(`WebSocket error: ${err.message}`);
+        }
+  
+        logger.info('Successfully joined the game (confirmed via instructions-page)');
+  
         const cookies = await this.context.cookies();
         const localStorage = await page.evaluate(() => {
           const data = {};
@@ -228,42 +217,42 @@ class BrowserService {
           }
           return data;
         });
-        
-        // Отримуємо clientId та інші дані з WebSocket повідомлень
+  
         let clientId = null;
         try {
-          const messageData = JSON.parse(message);
-          if (Array.isArray(messageData)) {
-            for (const item of messageData) {
+          const parsed = JSON.parse(wsMessage);
+          if (Array.isArray(parsed)) {
+            for (const item of parsed) {
               if (item.clientId) {
                 clientId = item.clientId;
                 break;
               }
             }
-          } else if (messageData.clientId) {
-            clientId = messageData.clientId;
+          } else if (parsed?.clientId) {
+            clientId = parsed.clientId;
           }
         } catch (e) {
-          logger.error(`Error parsing WebSocket message: ${e.message}`);
+          logger.warn(`Unable to parse clientId from WS message: ${e.message}`);
         }
-        
+  
         return {
           success: true,
-          clientId,
+          clientId: clientId || null,
           cookies,
           localStorage,
-          message
+          wsMessage
         };
-      } finally {
-        // Не закриваємо сторінку, щоб бот міг продовжувати грати
-        // Збережемо посилання на сторінку для подальшого використання
-        return page;
+  
+      } catch (error) {
+        logger.error(`Error inside joinKahootGame: ${error.message}`);
+        throw error;
       }
     } catch (error) {
       logger.error(`Error joining Kahoot game: ${error.message}`);
       throw error;
     }
   }
+  
 
   async close() {
     try {
