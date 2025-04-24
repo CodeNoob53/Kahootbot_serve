@@ -3,87 +3,86 @@ const { v4: uuidv4 } = require('uuid');
 const BotManager = require('../models/BotManager');
 const logger = require('../utils/logger');
 
-// Start a new bot
+// Запуск нового бота
 exports.startBot = async (req, res) => {
   try {
-    const { name, pin, usePlaywright = true, useML, useSearch } = req.body;
+    const { name, pin } = req.body;
     
-    logger.info(`Starting bot with PIN: ${pin}, Name: ${name}, usePlaywright: ${usePlaywright}`);
+    logger.info(`Запуск бота з PIN: ${pin}, Ім'я: ${name}`);
     
-    // Validate input
+    // Перевірка введених даних
     if (!name || !pin) {
       return res.status(400).json({
         success: false,
-        message: 'Name and PIN are required'
+        message: 'Ім\'я та PIN обов\'язкові'
       });
     }
     
-    // Basic PIN validation
+    // Базова перевірка формату PIN
     if (!/^\d{6,10}$/.test(pin)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid PIN format. PIN must be 6-10 digits'
+        message: 'Недійсний формат PIN. PIN повинен містити 6-10 цифр'
       });
     }
     
-    // Create a unique bot ID
+    // Створюємо унікальний ідентифікатор бота
     const botId = uuidv4();
     
-    // Create bot configuration
+    // Створюємо конфігурацію бота
     const config = {
       id: botId,
       name,
       pin,
-      usePlaywright, // Додаємо параметр для вибору методу з'єднання
       onLog: (message, type) => {
         logger.info(`[Bot ${botId}] [${type || 'INFO'}] ${message}`);
       }
     };
     
-    logger.info("Bot manager obtaining...");
-    // Start the bot
+    logger.info("Отримання менеджера ботів...");
+    // Запускаємо бота
     const botManager = BotManager.getInstance();
-    logger.info("Bot manager obtained, starting bot...");
+    logger.info("Менеджер ботів отримано, запуск бота...");
     const startResult = await botManager.startBot(config);
     
-    logger.info(`Start result: ${JSON.stringify(startResult)}`);
+    logger.info(`Результат запуску: ${JSON.stringify(startResult)}`);
     
     if (startResult.success) {
-      logger.info(`Bot started with ID: ${botId}`);
+      logger.info(`Бот запущено з ID: ${botId}`);
       return res.status(201).json({
         success: true,
         botId,
-        message: 'Bot started successfully',
-        method: usePlaywright ? 'playwright' : 'websocket'
+        message: 'Бот успішно запущено',
+        method: 'playwright'
       });
     } else {
-      logger.error(`Failed to start bot: ${startResult.message}`);
+      logger.error(`Не вдалося запустити бота: ${startResult.message}`);
       return res.status(400).json({
         success: false,
         message: startResult.message
       });
     }
   } catch (error) {
-    logger.error(`DETAILED ERROR: ${error.message}`);
+    logger.error(`ДЕТАЛЬНА ПОМИЛКА: ${error.message}`);
     logger.error(`Stack trace: ${error.stack}`);
     return res.status(500).json({
       success: false,
-      message: `Internal server error: ${error.message}`
+      message: `Внутрішня помилка сервера: ${error.message}`
     });
   }
 };
 
-// Stop a bot
+// Зупинка бота
 exports.stopBot = async (req, res) => {
   try {
     const { botId } = req.body;
     
-    logger.info(`Stopping bot: ${botId}`);
+    logger.info(`Зупинка бота: ${botId}`);
     
     if (!botId) {
       return res.status(400).json({
         success: false,
-        message: 'Bot ID is required'
+        message: 'ID бота обов\'язковий'
       });
     }
     
@@ -91,38 +90,38 @@ exports.stopBot = async (req, res) => {
     const stopResult = await botManager.stopBot(botId);
     
     if (stopResult.success) {
-      logger.info(`Bot stopped: ${botId}`);
+      logger.info(`Бот зупинено: ${botId}`);
       return res.json({
         success: true,
-        message: 'Bot stopped successfully'
+        message: 'Бот успішно зупинено'
       });
     } else {
-      logger.error(`Failed to stop bot: ${stopResult.message}`);
+      logger.error(`Не вдалося зупинити бота: ${stopResult.message}`);
       return res.status(400).json({
         success: false,
         message: stopResult.message
       });
     }
   } catch (error) {
-    logger.error(`Error stopping bot: ${error.message}`);
+    logger.error(`Помилка зупинки бота: ${error.message}`);
     return res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: 'Внутрішня помилка сервера'
     });
   }
 };
 
-// Get status of a specific bot
+// Отримання статусу конкретного бота
 exports.getBotStatus = (req, res) => {
   try {
     const { id } = req.params;
     
-    logger.info(`Getting status for bot: ${id}`);
+    logger.info(`Отримання статусу для бота: ${id}`);
     
     if (!id) {
       return res.status(400).json({
         success: false,
-        message: 'Bot ID is required'
+        message: 'ID бота обов\'язковий'
       });
     }
     
@@ -137,22 +136,22 @@ exports.getBotStatus = (req, res) => {
     } else {
       return res.status(404).json({
         success: false,
-        message: 'Bot not found'
+        message: 'Бота не знайдено'
       });
     }
   } catch (error) {
-    logger.error(`Error getting bot status: ${error.message}`);
+    logger.error(`Помилка отримання статусу бота: ${error.message}`);
     return res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: 'Внутрішня помилка сервера'
     });
   }
 };
 
-// Get all active bots
+// Отримання всіх активних ботів
 exports.getAllBots = (req, res) => {
   try {
-    logger.info('Getting all bots');
+    logger.info('Отримання всіх ботів');
     const botManager = BotManager.getInstance();
     const bots = botManager.getAllBots();
     
@@ -162,47 +161,31 @@ exports.getAllBots = (req, res) => {
       bots
     });
   } catch (error) {
-    logger.error(`Error getting all bots: ${error.message}`);
+    logger.error(`Помилка отримання всіх ботів: ${error.message}`);
     return res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: 'Внутрішня помилка сервера'
     });
   }
 };
 
-// Add test endpoint for direct Kahoot testing
+// Тестовий ендпоінт для прямого тестування Kahoot
 exports.testKahoot = async (req, res) => {
   try {
     const { pin } = req.params;
-    const usePlaywright = req.query.method === 'playwright';
     
-    logger.info(`Testing direct Kahoot connection for PIN: ${pin}, method: ${usePlaywright ? 'Playwright' : 'HTTP'}`);
+    logger.info(`Тестування підключення до Kahoot для PIN: ${pin}`);
     
-    const KahootService = require('../services/KahootService');
-    const kahootService = new KahootService();
+    const BrowserService = require('../services/BrowserService');
+    const sessionData = await BrowserService.getKahootSession(pin);
     
-    // Якщо вказано метод Playwright, використовуємо BrowserService
-    if (usePlaywright) {
-      const BrowserService = require('../services/BrowserService');
-      const sessionData = await BrowserService.getKahootSession(pin);
-      
-      return res.json({
-        success: true,
-        method: 'playwright',
-        sessionData
-      });
-    } else {
-      // Інакше використовуємо стандартний метод
-      const result = await kahootService.getSession(pin);
-      
-      return res.json({
-        success: true,
-        method: 'http',
-        sessionData: result
-      });
-    }
+    return res.json({
+      success: true,
+      method: 'playwright',
+      sessionData
+    });
   } catch (error) {
-    logger.error(`Test Kahoot error: ${error.message}`);
+    logger.error(`Помилка тестування Kahoot: ${error.message}`);
     return res.status(500).json({
       success: false,
       message: error.message,
@@ -211,7 +194,7 @@ exports.testKahoot = async (req, res) => {
   }
 };
 
-// Додаємо новий ендпоінт для прямого тестування входу в гру
+// Ендпоінт для прямого тестування входу в гру
 exports.testJoinKahoot = async (req, res) => {
   try {
     const { pin, name } = req.body;
@@ -223,20 +206,20 @@ exports.testJoinKahoot = async (req, res) => {
       });
     }
     
-    logger.info(`Testing joining Kahoot game PIN: ${pin} with name: ${name}`);
+    logger.info(`Тестування приєднання до гри Kahoot PIN: ${pin} з ім'ям: ${name}`);
     
     const BrowserService = require('../services/BrowserService');
     const result = await BrowserService.joinKahootGame(pin, name);
     
-    // Ми отримали результат, але не повертаємо сторінку, щоб уникнути проблем з серіалізацією
+    // Отримали результат, але не повертаємо сторінку, щоб уникнути проблем з серіалізацією
     return res.json({
       success: true,
-      message: 'Successfully joined Kahoot game',
+      message: 'Успішно приєднано до гри Kahoot',
       clientId: result.clientId,
       cookiesCount: result.cookies ? result.cookies.length : 0
     });
   } catch (error) {
-    logger.error(`Test join Kahoot error: ${error.message}`);
+    logger.error(`Помилка тестування приєднання до Kahoot: ${error.message}`);
     return res.status(500).json({
       success: false,
       message: error.message
@@ -244,20 +227,20 @@ exports.testJoinKahoot = async (req, res) => {
   }
 };
 
-// Додаємо ендпоінт для ініціалізації Playwright
+// Ендпоінт для ініціалізації Playwright
 exports.initPlaywright = async (req, res) => {
   try {
-    logger.info('Initializing Playwright');
+    logger.info('Ініціалізація Playwright');
     
     const BrowserService = require('../services/BrowserService');
     const result = await BrowserService.initialize();
     
     return res.json({
       success: result,
-      message: result ? 'Playwright initialized successfully' : 'Failed to initialize Playwright'
+      message: result ? 'Playwright успішно ініціалізовано' : 'Не вдалося ініціалізувати Playwright'
     });
   } catch (error) {
-    logger.error(`Playwright initialization error: ${error.message}`);
+    logger.error(`Помилка ініціалізації Playwright: ${error.message}`);
     return res.status(500).json({
       success: false,
       message: error.message

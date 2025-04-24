@@ -18,7 +18,7 @@ router.get('/proxy-status', proxyController.getProxyStatus);
 // Test routes
 router.get('/test-kahoot/:pin', botController.testKahoot);
 
-// Нові маршрути для Playwright
+// Playwright-specific routes
 router.post('/init-playwright', botController.initPlaywright);
 router.post('/test-join-kahoot', botController.testJoinKahoot);
 

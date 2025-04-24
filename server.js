@@ -1,9 +1,8 @@
- // server.js
+// server.js
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
-const { setupWebSocketServer } = require('./routes/ws');
 const apiRoutes = require('./routes/api');
 const logger = require('./utils/logger');
 
@@ -27,25 +26,22 @@ app.use('/api', apiRoutes);
 // Basic route
 app.get('/', (req, res) => {
   res.json({
-    status: 'Server is running',
+    status: 'Сервер працює',
     timestamp: new Date().toISOString()
   });
 });
 
 // Error handling
 app.use((err, req, res, next) => {
-  logger.error(`Error: ${err.message}`);
+  logger.error(`Помилка: ${err.message}`);
   res.status(500).json({
-    error: 'Internal Server Error',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+    error: 'Внутрішня помилка сервера',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Щось пішло не так'
   });
 });
-
-// Initialize WebSocket server
-setupWebSocketServer(server);
 
 // Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT}`);
+  logger.info(`Сервер запущено на порту ${PORT}`);
 });

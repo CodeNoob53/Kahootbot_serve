@@ -5,7 +5,7 @@ const logger = require('../utils/logger');
 class BotManager {
   constructor() {
     this.bots = new Map();
-    logger.info('Bot Manager initialized');
+    logger.info('Bot Manager ініціалізовано');
   }
   
   static getInstance() {
@@ -20,70 +20,33 @@ class BotManager {
       if (this.bots.has(config.id)) {
         return {
           success: false,
-          message: 'Bot with this ID already exists'
+          message: 'Бот з таким ID вже існує'
         };
       }
       
       const bot = new KahootBot(config);
       
-      // Start the bot - перевіряємо наявність методу connect
-      if (typeof bot.connect !== 'function') {
-        logger.error(`Bot ${config.id} does not have connect method`);
-        
-        // Перевіряємо, чи має бот інші можливі методи
-        const availableMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(bot))
-          .filter(method => typeof bot[method] === 'function' && method !== 'constructor');
-        
-        logger.info(`Available methods: ${availableMethods.join(', ')}`);
-        
-        // Якщо є метод connectWebSocket, можливо потрібно змінити підхід
-        if (typeof bot.connectWebSocket === 'function') {
-          logger.info(`Trying to use connectWebSocket instead`);
-          try {
-            await bot.connectWebSocket();
-            this.bots.set(config.id, bot);
-            
-            logger.info(`Bot ${config.id} connected using connectWebSocket`);
-            return {
-              success: true,
-              message: 'Bot connected successfully using connectWebSocket'
-            };
-          } catch (wsError) {
-            logger.error(`Failed to connect with connectWebSocket: ${wsError.message}`);
-            return {
-              success: false,
-              message: `Failed to connect: ${wsError.message}`
-            };
-          }
-        }
-        
-        return {
-          success: false,
-          message: 'bot.connect is not a function'
-        };
-      }
-      
-      // Викликаємо метод connect якщо він доступний
+      // Запускаємо бота
       const connected = await bot.connect();
       
       if (!connected) {
-        logger.error(`Failed to connect bot: ${config.id}`);
+        logger.error(`Не вдалося підключити бота: ${config.id}`);
         return {
           success: false,
-          message: 'Failed to connect to Kahoot'
+          message: 'Не вдалося підключитися до Kahoot'
         };
       }
       
-      // Store the bot
+      // Зберігаємо бота
       this.bots.set(config.id, bot);
       
-      logger.info(`Bot ${config.id} started successfully`);
+      logger.info(`Бот ${config.id} успішно запущено`);
       return {
         success: true,
-        message: 'Bot started successfully'
+        message: 'Бот успішно запущено'
       };
     } catch (error) {
-      logger.error(`Error starting bot: ${error.message}`);
+      logger.error(`Помилка запуску бота: ${error.message}`);
       return {
         success: false,
         message: error.message
@@ -98,23 +61,23 @@ class BotManager {
       if (!bot) {
         return {
           success: false,
-          message: 'Bot not found'
+          message: 'Бота не знайдено'
         };
       }
       
-      // Disconnect the bot
+      // Відключаємо бота
       await bot.disconnect();
       
-      // Remove from the map
+      // Видаляємо з мапи
       this.bots.delete(id);
       
-      logger.info(`Bot ${id} stopped successfully`);
+      logger.info(`Бот ${id} успішно зупинено`);
       return {
         success: true,
-        message: 'Bot stopped successfully'
+        message: 'Бот успішно зупинено'
       };
     } catch (error) {
-      logger.error(`Error stopping bot: ${error.message}`);
+      logger.error(`Помилка зупинки бота: ${error.message}`);
       return {
         success: false,
         message: error.message

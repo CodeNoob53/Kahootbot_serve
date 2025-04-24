@@ -25,8 +25,6 @@ describe('KahootBot', function() {
       id: 'test-bot-1',
       name: 'TestBot',
       pin: '12345678', // Використовуємо неіснуючий PIN для тесту ініціалізації
-      useML: false,
-      useSearch: false,
       onLog: () => {}
     });
     
@@ -42,8 +40,6 @@ describe('KahootBot', function() {
       id: 'test-bot-invalid',
       name: 'InvalidBot',
       pin: 'abc', // Неправильний формат
-      useML: false,
-      useSearch: false,
       onLog: () => {}
     });
     
@@ -60,10 +56,15 @@ describe('KahootBot', function() {
       id: 'test-bot-2',
       name: 'ConnectBot',
       pin: realPin,
-      useML: false,
-      useSearch: false,
       onLog: () => {}
     });
+    
+    // Мокуємо функцію connectViaPlaywright для тесту
+    connectBot.connectViaPlaywright = async function() {
+      this.connected = true;
+      this.browserPage = {};
+      return true;
+    };
     
     const connected = await connectBot.connect();
     expect(connected).to.be.true;
@@ -96,8 +97,6 @@ describe('BotManager', function() {
       id: 'test-manager-bot',
       name: 'ManagedBot',
       pin: '12345678', // Неіснуючий PIN для тесту
-      useML: false,
-      useSearch: false,
       onLog: () => {}
     };
     
