@@ -150,7 +150,7 @@ class BrowserService {
   async joinKahootGame(pin, name) {
     try {
       logger.info(`Joining Kahoot game with PIN: ${pin}, name: ${name}`);
-      
+  
       if (!this.browser) {
         const initialized = await this.initialize();
         if (!initialized) {
@@ -176,35 +176,23 @@ class BrowserService {
         await page.fill('#nickname', name);
         await page.click('button[type="submit"]');
   
+        // 🧠 Чекаємо 2 секунди на можливу помилку
+        await page.waitForTimeout(2000);
+  
+        // ⛔ Перевірка на завершену або недійсну гру через системний банер
+        const errorNotification = await page.$('[data-functional-selector="nonexisting-session-error-notification"]');
+        if (errorNotification) {
+          logger.warn('Kahoot повідомляє: гра не існує або завершена');
+          return {
+            success: false,
+            reason: 'game_closed',
+            message: 'Ця гра завершена або не існує.'
+          };
+        }
+  
+        // ✅ Чек DOM підтвердження входу
         logger.info('Waiting for game confirmation (instructions-page)');
         await page.waitForSelector('[data-functional-selector="instructions-page"]', { timeout: 15000 });
-  
-        // Listen for WebSocket
-        let wsMessage = null;
-        const wsMessagePromise = new Promise((resolve) => {
-          page.on('websocket', ws => {
-            logger.info(`WebSocket connected: ${ws.url()}`);
-            ws.on('message', data => {
-              const msgStr = data.toString();
-              logger.debug(`WebSocket message: ${msgStr.substring(0, 100)}...`);
-              if (msgStr.includes('"type":"login"') || msgStr.includes('"channel":"/service/controller"')) {
-                resolve(msgStr);
-              }
-            });
-          });
-        });
-  
-        try {
-          wsMessage = await Promise.race([
-            wsMessagePromise,
-            new Promise(resolve => setTimeout(() => resolve(null), 20000))
-          ]);
-          if (!wsMessage) {
-            logger.warn('WebSocket confirmation not received within timeout. Proceeding based on DOM state.');
-          }
-        } catch (err) {
-          logger.warn(`WebSocket error: ${err.message}`);
-        }
   
         logger.info('Successfully joined the game (confirmed via instructions-page)');
   
@@ -218,40 +206,25 @@ class BrowserService {
           return data;
         });
   
-        let clientId = null;
-        try {
-          const parsed = JSON.parse(wsMessage);
-          if (Array.isArray(parsed)) {
-            for (const item of parsed) {
-              if (item.clientId) {
-                clientId = item.clientId;
-                break;
-              }
-            }
-          } else if (parsed?.clientId) {
-            clientId = parsed.clientId;
-          }
-        } catch (e) {
-          logger.warn(`Unable to parse clientId from WS message: ${e.message}`);
-        }
-  
         return {
           success: true,
-          clientId: clientId || null,
+          clientId: null,
           cookies,
           localStorage,
-          wsMessage
+          page // потрібен для Playwright listeners
         };
   
       } catch (error) {
         logger.error(`Error inside joinKahootGame: ${error.message}`);
         throw error;
       }
+  
     } catch (error) {
       logger.error(`Error joining Kahoot game: ${error.message}`);
       throw error;
     }
   }
+  
   
 
   async close() {
