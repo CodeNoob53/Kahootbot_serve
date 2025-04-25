@@ -20,6 +20,17 @@ app.use((req, res, next) => {
   next();
 });
 
+
+app.get('/api/v1/users/search', (req, res) => {
+  logger.warn(`[СПІЙМАНО] Незареєстрований запит на /api/v1/users/search`);
+  logger.warn(`IP: ${req.ip}`);
+  logger.warn(`User-Agent: ${req.get('User-Agent')}`);
+  logger.warn(`Headers: ${JSON.stringify(req.headers)}`);
+  logger.warn(`Query: ${JSON.stringify(req.query)}`);
+  res.status(404).json({ error: 'Маршрут не підтримується' });
+});
+
+
 // Routes
 app.use('/api', apiRoutes);
 
